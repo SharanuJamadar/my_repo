@@ -42,9 +42,26 @@ interface TradingChartProps {
   onToggleLiveStreaming: () => void;
   config: StrategyConfig;
   activeSignal?: GeneratedSignalPayload | null;
+  onLivePriceTick?: (instrumentId: string, price: number) => void;
 }
 
 type ChartMode = 'SHARAN_LIVE' | 'STREAM_WIDGET';
+type WsConnStatus = 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING';
+
+function timeframeToSeconds(tf: Timeframe): number {
+  switch (tf) {
+    case '5m':
+      return 300;
+    case '15m':
+      return 900;
+    case '1h':
+      return 3600;
+    case '4h':
+      return 14400;
+    case '1d':
+      return 86400;
+  }
+}
 
 function calcEmaPoints(candles: CandleBar[], period: number) {
   if (candles.length === 0) return [];
@@ -97,6 +114,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   onToggleLiveStreaming,
   config,
   activeSignal,
+  onLivePriceTick,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -110,11 +128,26 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const hasFitRef = useRef<boolean>(false);
   const lastStructureKeyRef = useRef<string>('');
   const lastLevelsKeyRef = useRef<string>('');
+  const latestBarRef = useRef<{
+    time: number;
+    open: number;
+    high: number;
+    low: number;
+    close: number;
+  } | null>(null);
+  const pendingTickRef = useRef<{ price: number; ts: number } | null>(null);
+  const lastUiNotifyAtRef = useRef<number>(0);
+  const onLivePriceTickRef = useRef(onLivePriceTick);
+  onLivePriceTickRef.current = onLivePriceTick;
+  const liveHeaderPriceRef = useRef<HTMLSpanElement | null>(null);
 
   const [chartMode, setChartMode] = useState<ChartMode>('SHARAN_LIVE');
+  const [wsStatus, setWsStatus] = useState<WsConnStatus>('IDLE');
   const [showEmas, setShowEmas] = useState(true);
   const [showVwap, setShowVwap] = useState(true);
   const [showLevels, setShowLevels] = useState(true);
+
+  const supportsBinanceWs = Boolean(instrument.binanceSymbol || instrument.binanceFuturesSymbol);
 
   const uniqueCandles = useMemo(() => {
     if (!quote?.candles?.length) return [];
@@ -136,6 +169,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     hasFitRef.current = false;
     lastStructureKeyRef.current = '';
     lastLevelsKeyRef.current = '';
+    latestBarRef.current = null;
+    pendingTickRef.current = null;
   }, [instrument.id, timeframe, chartMode]);
 
   // 1. Initialize chart instance only when structural layout changes (prevents 4s live-tick flicker)
@@ -267,6 +302,16 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
     const candleSeries = candleSeriesRef.current;
     const lastBar = uniqueCandles[uniqueCandles.length - 1];
+    latestBarRef.current = {
+      time: lastBar.time,
+      open: lastBar.open,
+      high: lastBar.high,
+      low: lastBar.low,
+      close: lastBar.close,
+    };
+    if (liveHeaderPriceRef.current && quote.price !== undefined) {
+      liveHeaderPriceRef.current.textContent = `${instrument.currency}${quote.price.toLocaleString()}`;
+    }
     const structureKey = `${chartMode}:${instrument.id}:${timeframe}:${showEmas}:${showVwap}:${config.emaFast}:${config.emaMid}:${config.emaSlow}:${uniqueCandles.length}:${uniqueCandles[0].time}:${lastBar.time}`;
 
     if (lastStructureKeyRef.current === structureKey) {
@@ -434,6 +479,137 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     activeSignal,
   ]);
 
+  // 3. Real 30ms Binance Spot/Futures WebSocket stream for supported markets
+  useEffect(() => {
+    if (chartMode !== 'SHARAN_LIVE' || !liveStreaming || !supportsBinanceWs) {
+      setWsStatus('IDLE');
+      return;
+    }
+
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let retryMs = 1200;
+    const tfSec = timeframeToSeconds(timeframe);
+
+    const connect = () => {
+      if (disposed) return;
+      setWsStatus(retryMs > 1200 ? 'RECONNECTING' : 'CONNECTING');
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const url = `${wsProto}//${window.location.host}/ws/market?instrument=${encodeURIComponent(
+        instrument.id
+      )}`;
+
+      try {
+        socket = new WebSocket(url);
+      } catch {
+        reconnectTimer = window.setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 1.5, 8000);
+        return;
+      }
+
+      socket.onopen = () => {
+        if (disposed) {
+          socket?.close();
+          return;
+        }
+        retryMs = 1200;
+        setWsStatus('CONNECTED');
+      };
+
+      socket.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data) as {
+            type?: string;
+            price?: number;
+            ts?: number;
+          };
+          if (payload?.type === 'tick' && typeof payload.price === 'number' && payload.price > 0) {
+            pendingTickRef.current = {
+              price: payload.price,
+              ts: typeof payload.ts === 'number' ? payload.ts : Date.now(),
+            };
+          }
+        } catch {
+          // Ignore invalid WS payloads
+        }
+      };
+
+      socket.onclose = () => {
+        if (disposed) return;
+        setWsStatus('RECONNECTING');
+        reconnectTimer = window.setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 1.5, 8000);
+      };
+
+      socket.onerror = () => {
+        try {
+          socket?.close();
+        } catch {
+          // Ignore close error
+        }
+      };
+    };
+
+    connect();
+
+    // Flush real incoming Binance ticks onto lightweight-charts canvas at 30ms cadence
+    const flushTimer = window.setInterval(() => {
+      const tick = pendingTickRef.current;
+      if (!tick || !candleSeriesRef.current || !latestBarRef.current) return;
+      pendingTickRef.current = null;
+
+      const tickBucket = Math.floor(tick.ts / 1000 / tfSec) * tfSec;
+      const curBar = latestBarRef.current;
+      const nextBar =
+        tickBucket > curBar.time
+          ? {
+              time: tickBucket,
+              open: tick.price,
+              high: tick.price,
+              low: tick.price,
+              close: tick.price,
+            }
+          : {
+              time: curBar.time,
+              open: curBar.open,
+              high: Math.max(curBar.high, tick.price),
+              low: Math.min(curBar.low, tick.price),
+              close: tick.price,
+            };
+
+      latestBarRef.current = nextBar;
+      candleSeriesRef.current.update({
+        time: nextBar.time as UTCTimestamp,
+        open: nextBar.open,
+        high: nextBar.high,
+        low: nextBar.low,
+        close: nextBar.close,
+      });
+
+      if (liveHeaderPriceRef.current) {
+        liveHeaderPriceRef.current.textContent = `${instrument.currency}${tick.price.toLocaleString()}`;
+      }
+
+      const now = Date.now();
+      if (onLivePriceTickRef.current && now - lastUiNotifyAtRef.current >= 250) {
+        lastUiNotifyAtRef.current = now;
+        onLivePriceTickRef.current(instrument.id, tick.price);
+      }
+    }, 30);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(flushTimer);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      try {
+        socket?.close();
+      } catch {
+        // Ignore cleanup close
+      }
+    };
+  }, [chartMode, liveStreaming, supportsBinanceWs, instrument.id, instrument.currency, timeframe]);
+
   const tvEmbedUrl = useMemo(() => {
     const tvSymbol = instrument.tradingViewSymbol;
     const tvInterval = mapTimeframeToTv(timeframe);
@@ -453,12 +629,24 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               <span className="text-xs font-normal text-slate-400">
                 {quote?.instrument.exchangeLabel ?? instrument.exchangeLabel}
               </span>
+              {quote?.available && quote.price !== undefined && (
+                <>
+                  <span className="text-slate-500">·</span>
+                  <span
+                    ref={liveHeaderPriceRef}
+                    className="font-mono-tabular text-sm font-semibold text-emerald-300"
+                  >
+                    {instrument.currency}
+                    {quote.price.toLocaleString()}
+                  </span>
+                </>
+              )}
               {liveStreaming && quote?.available && (
                 <>
                   <span className="text-slate-500">·</span>
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    LIVE
+                    {supportsBinanceWs && wsStatus === 'CONNECTED' ? 'WS 30ms' : 'LIVE'}
                   </span>
                 </>
               )}
@@ -467,7 +655,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               {chartMode === 'STREAM_WIDGET'
                 ? `Real-Time Stream Widget (${instrument.tradingViewSymbol}) · Timeframe ${timeframe.toUpperCase()}`
                 : quote?.available
-                  ? `${quote.provider} · Updated ${new Date(quote.marketTimestamp).toLocaleTimeString()}`
+                  ? `${quote.provider} · ${
+                      supportsBinanceWs
+                        ? wsStatus === 'CONNECTED'
+                          ? 'Binance WS stream (30ms canvas flush)'
+                          : 'Binance WS connecting...'
+                        : '1.5s Exchange Poll (Non-Binance market)'
+                    } · Updated ${new Date(quote.marketTimestamp).toLocaleTimeString()}`
                   : quote?.statusText || 'Connecting to live feed'}
             </p>
           </div>
@@ -569,7 +763,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             }`}
           >
             {liveStreaming ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            {liveStreaming ? 'Live 1.5s' : 'Paused'}
+            {liveStreaming ? (supportsBinanceWs ? 'Binance WS 30ms' : 'Live 1.5s') : 'Paused'}
           </button>
 
           <button

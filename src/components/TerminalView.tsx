@@ -11,7 +11,30 @@ import {
 import { TradingChart } from './TradingChart';
 import { SignalCard } from './SignalCard';
 
-const QUICK_TERMINAL_IDS = ['NIFTY50', 'XAUUSD', 'XAGUSD', 'BTCUSDT', 'MCX_CRUDEOIL'];
+const QUICK_INDIAN_IDS = [
+  'NIFTY50',
+  'BANKNIFTY',
+  'FINNIFTY',
+  'SENSEX',
+  'RELIANCE',
+  'HDFCBANK',
+  'SBIN',
+  'INFY',
+  'TCS',
+];
+const QUICK_INTL_IDS = [
+  'XAUUSD',
+  'XAGUSD',
+  'MCX_CRUDEOIL',
+  'USOIL',
+  'NAS100',
+  'SPX500',
+  'EURUSD',
+  'GBPUSD',
+  'BTCUSDT',
+  'ETHUSDT',
+  'SOLUSDT',
+];
 
 interface TerminalViewProps {
   selectedInstrumentId: string;
@@ -39,6 +62,7 @@ interface TerminalViewProps {
   savingSignal: boolean;
   sendingTelegram: boolean;
   telegramNote: string | null;
+  onLivePriceTick?: (instrumentId: string, price: number) => void;
 }
 
 export const TerminalView: React.FC<TerminalViewProps> = ({
@@ -67,13 +91,20 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   savingSignal,
   sendingTelegram,
   telegramNote,
+  onLivePriceTick,
 }) => {
-  const activeInstruments = useMemo(() => {
-    const list = INSTRUMENTS.filter(
-      (i) => config.activeInstruments.length === 0 || config.activeInstruments.includes(i.id)
-    );
-    return list.length > 0 ? list : INSTRUMENTS;
-  }, [config.activeInstruments]);
+  const indianInstruments = useMemo(
+    () => INSTRUMENTS.filter((i) => i.segment === 'INDIAN'),
+    []
+  );
+  const mcxInstruments = useMemo(
+    () => INSTRUMENTS.filter((i) => i.segment === 'MCX'),
+    []
+  );
+  const intlInstruments = useMemo(
+    () => INSTRUMENTS.filter((i) => i.segment === 'INTERNATIONAL'),
+    []
+  );
 
   const selectedInstrument = useMemo(
     () => INSTRUMENTS.find((i) => i.id === selectedInstrumentId) ?? INSTRUMENTS[0],
@@ -90,17 +121,35 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-3">
             <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Trading Terminal Market</label>
+              <label className="block text-[11px] text-slate-400 mb-1">
+                Trading Terminal Market ({INSTRUMENTS.length} Live Charts)
+              </label>
               <select
                 value={selectedInstrumentId}
                 onChange={(e) => onSelectInstrument(e.target.value)}
                 className="bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-semibold text-white focus:outline-none focus:border-emerald-500"
               >
-                {activeInstruments.map((inst) => (
-                  <option key={inst.id} value={inst.id}>
-                    {inst.symbol} · {inst.segment}
-                  </option>
-                ))}
+                <optgroup label="Indian Markets (Indices & NSE F&O)">
+                  {indianInstruments.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.symbol} · {inst.exchangeLabel}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="MCX Commodities">
+                  {mcxInstruments.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.symbol} · {inst.exchangeLabel}
+                    </option>
+                  ))}
+                </optgroup>
+                <optgroup label="International (Metals, US Indices, FX & Crypto)">
+                  {intlInstruments.map((inst) => (
+                    <option key={inst.id} value={inst.id}>
+                      {inst.symbol} · {inst.exchangeLabel}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
             </div>
 
@@ -164,27 +213,51 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         </div>
 
         {/* Fast Market Switch Buttons */}
-        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/[0.06]">
-          <span className="text-[11px] text-slate-400 mr-1">Priority Charts:</span>
-          {QUICK_TERMINAL_IDS.map((id) => {
-            const inst = INSTRUMENTS.find((x) => x.id === id);
-            if (!inst) return null;
-            const active = selectedInstrumentId === inst.id;
-            return (
-              <button
-                key={inst.id}
-                type="button"
-                onClick={() => onSelectInstrument(inst.id)}
-                className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                  active
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-[#090B0E] border border-white/[0.08] text-slate-300 hover:text-white'
-                }`}
-              >
-                {inst.symbol}
-              </button>
-            );
-          })}
+        <div className="space-y-2 pt-2.5 border-t border-white/[0.06]">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 mr-1 min-w-[116px]">Indian Most Traded:</span>
+            {QUICK_INDIAN_IDS.map((id) => {
+              const inst = INSTRUMENTS.find((x) => x.id === id);
+              if (!inst) return null;
+              const active = selectedInstrumentId === inst.id;
+              return (
+                <button
+                  key={inst.id}
+                  type="button"
+                  onClick={() => onSelectInstrument(inst.id)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                    active
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-[#090B0E] border border-white/[0.08] text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {inst.symbol}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] text-slate-400 mr-1 min-w-[116px]">International &amp; MCX:</span>
+            {QUICK_INTL_IDS.map((id) => {
+              const inst = INSTRUMENTS.find((x) => x.id === id);
+              if (!inst) return null;
+              const active = selectedInstrumentId === inst.id;
+              return (
+                <button
+                  key={inst.id}
+                  type="button"
+                  onClick={() => onSelectInstrument(inst.id)}
+                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                    active
+                      ? 'bg-emerald-600 text-white'
+                      : 'bg-[#090B0E] border border-white/[0.08] text-slate-300 hover:text-white'
+                  }`}
+                >
+                  {inst.symbol}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -208,6 +281,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             onToggleLiveStreaming={onToggleLiveStreaming}
             config={config}
             activeSignal={liveSignal}
+            onLivePriceTick={onLivePriceTick}
           />
         </div>
 

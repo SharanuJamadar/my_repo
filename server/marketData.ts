@@ -31,8 +31,9 @@ const rawFeedCache = new Map<string, CachedRaw>();
 const inFlightRaw = new Map<string, Promise<RawMarketData | null>>();
 const FRESH_CANDLES_MS = 12_000;
 const STALE_MAX_MS = 180_000;
-const WATCHLIST_FRESH_MS = 20_000;
+const WATCHLIST_FRESH_MS = 8_000;
 const SPOT_TICK_COOLDOWN_MS = 1_200;
+const WATCHLIST_SPOT_COOLDOWN_MS = 2_500;
 
 const BROWSER_HEADERS = {
   'User-Agent':
@@ -138,6 +139,21 @@ async function fetchBinanceSpotPrice(symbol: string): Promise<number | null> {
   return null;
 }
 
+async function fetchBinanceFuturesPrice(symbol: string): Promise<number | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`,
+      1800
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as any;
+    const p = Number(json?.price);
+    return Number.isFinite(p) && p > 0 ? p : null;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchYahooFastSpot(yahooSymbol: string): Promise<number | null> {
   try {
     const res = await fetchWithTimeout(
@@ -156,16 +172,18 @@ async function fetchYahooFastSpot(yahooSymbol: string): Promise<number | null> {
 }
 
 async function patchCachedSpotPrice(instrument: InstrumentMeta, entry: CachedRaw): Promise<void> {
+  entry.spotCheckedAt = Date.now();
   let spotPrice: number | null = null;
   if (instrument.binanceSymbol) {
     spotPrice = await fetchBinanceSpotPrice(instrument.binanceSymbol);
+  } else if (instrument.binanceFuturesSymbol) {
+    spotPrice = await fetchBinanceFuturesPrice(instrument.binanceFuturesSymbol);
   } else if (instrument.swissquotePair) {
     spotPrice = await fetchSwissquoteSpot(instrument.swissquotePair);
   } else {
     spotPrice = await fetchYahooFastSpot(instrument.yahooSymbol);
   }
 
-  entry.spotCheckedAt = Date.now();
   if (!spotPrice || spotPrice <= 0) return;
 
   // Reject mismatched proxy spot values (>5% jump in 1s is different contract scale)
@@ -269,6 +287,78 @@ async function fetchBinanceCrypto(
     }
   }
   return null;
+}
+
+async function fetchBinanceFutures(
+  symbol: string,
+  tf: Timeframe
+): Promise<RawMarketData | null> {
+  const intervalMap: Record<Timeframe, string> = {
+    '5m': '5m',
+    '15m': '15m',
+    '1h': '1h',
+    '4h': '4h',
+    '1d': '1d',
+  };
+  const interval = intervalMap[tf];
+
+  try {
+    const [klineRes, tickerRes] = await Promise.all([
+      fetchWithTimeout(
+        `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=140`,
+        4500
+      ),
+      fetchWithTimeout(
+        `https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=${symbol}`,
+        4500
+      ),
+    ]);
+    if (!klineRes.ok || !tickerRes.ok) return null;
+    const klines = (await klineRes.json()) as any[];
+    const ticker = (await tickerRes.json()) as any;
+    if (!Array.isArray(klines) || klines.length < 10) return null;
+
+    const candles: CandleBar[] = klines
+      .map((k) => ({
+        time: Math.floor(Number(k[0]) / 1000),
+        open: Number(k[1]),
+        high: Number(k[2]),
+        low: Number(k[3]),
+        close: Number(k[4]),
+        volume: Number(k[5]),
+      }))
+      .filter((c) => Number.isFinite(c.close) && c.close > 0);
+
+    if (candles.length < 10) return null;
+    const price = Number(ticker.lastPrice) || candles[candles.length - 1].close;
+    candles[candles.length - 1].close = price;
+    candles[candles.length - 1].high = Math.max(candles[candles.length - 1].high, price);
+    candles[candles.length - 1].low = Math.min(candles[candles.length - 1].low, price);
+
+    const open = Number(ticker.openPrice) || candles[0].open;
+    const high = Number(ticker.highPrice) || Math.max(...candles.map((c) => c.high));
+    const low = Number(ticker.lowPrice) || Math.min(...candles.map((c) => c.low));
+    const previousClose = Number(ticker.prevClosePrice) || open;
+    const change = Number(ticker.priceChange) || price - previousClose;
+    const changePercent =
+      Number(ticker.priceChangePercent) || (previousClose ? (change / previousClose) * 100 : 0);
+    const volume = Number(ticker.volume) || candles[candles.length - 1].volume;
+
+    return {
+      candles,
+      price,
+      open,
+      high,
+      low,
+      previousClose,
+      change,
+      changePercent,
+      volume,
+      provider: `Binance Futures Live (${symbol})`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 async function fetchBybitCrypto(symbol: string, tf: Timeframe): Promise<RawMarketData | null> {
@@ -525,11 +615,14 @@ function triggerUpstreamRefresh(
 
   const flight = (async () => {
     let raw: RawMarketData | null = null;
-    if (process.env.TWELVE_DATA_API_KEY && instrument.twelveDataSymbol) {
-      raw = await fetchTwelveData(instrument.twelveDataSymbol, timeframe);
-    }
-    if (!raw && instrument.binanceSymbol) {
+    if (instrument.binanceSymbol) {
       raw = await fetchBinanceCrypto(instrument.binanceSymbol, timeframe);
+    }
+    if (!raw && instrument.binanceFuturesSymbol) {
+      raw = await fetchBinanceFutures(instrument.binanceFuturesSymbol, timeframe);
+    }
+    if (!raw && process.env.TWELVE_DATA_API_KEY && instrument.twelveDataSymbol) {
+      raw = await fetchTwelveData(instrument.twelveDataSymbol, timeframe);
     }
     if (!raw && instrument.bybitSymbol) {
       raw = await fetchBybitCrypto(instrument.bybitSymbol, timeframe);
@@ -561,21 +654,58 @@ function triggerUpstreamRefresh(
   return flight;
 }
 
+export function applyLiveStreamTickToCache(binanceStreamSymbol: string, price: number): void {
+  if (!Number.isFinite(price) || price <= 0) return;
+  const upperSym = binanceStreamSymbol.toUpperCase();
+  const now = Date.now();
+
+  for (const [feedKey, entry] of rawFeedCache.entries()) {
+    if (!feedKey.startsWith(`${upperSym}:`)) continue;
+    const lastIdx = entry.data.candles.length - 1;
+    if (lastIdx < 0) continue;
+
+    const prevLast = entry.data.candles[lastIdx];
+    const nextCandles = [...entry.data.candles];
+    nextCandles[lastIdx] = {
+      ...prevLast,
+      close: price,
+      high: Math.max(prevLast.high, price),
+      low: Math.min(prevLast.low, price),
+    };
+
+    const change = price - entry.data.previousClose;
+    const changePercent = entry.data.previousClose ? (change / entry.data.previousClose) * 100 : 0;
+
+    entry.spotCheckedAt = now;
+    entry.data = {
+      ...entry.data,
+      candles: nextCandles,
+      price,
+      high: Math.max(entry.data.high, price),
+      low: Math.min(entry.data.low, price),
+      change,
+      changePercent,
+    };
+  }
+}
+
 async function getRawFeed(
   instrument: InstrumentMeta,
   timeframe: Timeframe,
   isWatchlist: boolean
 ): Promise<RawMarketData | null> {
   const feedKey = `${
-    instrument.binanceSymbol || instrument.yahooSymbol
+    instrument.binanceSymbol || instrument.binanceFuturesSymbol || instrument.yahooSymbol
   }:${timeframe}`;
   const now = Date.now();
   const freshWindowMs = isWatchlist ? WATCHLIST_FRESH_MS : FRESH_CANDLES_MS;
   const cached = rawFeedCache.get(feedKey);
 
-  // 1. Fresh cache hit: optionally apply 1.2s lightweight spot tick on active chart
+  const spotCooldown = isWatchlist ? WATCHLIST_SPOT_COOLDOWN_MS : SPOT_TICK_COOLDOWN_MS;
+
+  // 1. Fresh cache hit: apply lightweight spot tick (WS ticks already update spotCheckedAt continuously)
   if (cached && now < cached.freshUntil) {
-    if (!isWatchlist && now - cached.spotCheckedAt > SPOT_TICK_COOLDOWN_MS) {
+    if (now - cached.spotCheckedAt > spotCooldown) {
       await patchCachedSpotPrice(instrument, cached);
     }
     return cached.data;
@@ -583,7 +713,7 @@ async function getRawFeed(
 
   // 2. Stale-While-Revalidate hit: return cached snapshot immediately (<1ms) & refresh candles async
   if (cached && now < cached.staleUntil) {
-    if (!isWatchlist && now - cached.spotCheckedAt > SPOT_TICK_COOLDOWN_MS) {
+    if (now - cached.spotCheckedAt > spotCooldown) {
       await patchCachedSpotPrice(instrument, cached);
     }
     void triggerUpstreamRefresh(feedKey, instrument, timeframe, freshWindowMs);
@@ -595,7 +725,17 @@ async function getRawFeed(
 }
 
 export async function prewarmPriorityFeeds(): Promise<void> {
-  const priorityIds = ['XAUUSD', 'NIFTY50', 'XAGUSD', 'BTCUSDT', 'MCX_CRUDEOIL'];
+  const priorityIds = [
+    'XAUUSD',
+    'NIFTY50',
+    'BANKNIFTY',
+    'XAGUSD',
+    'BTCUSDT',
+    'MCX_CRUDEOIL',
+    'NAS100',
+    'EURUSD',
+    'RELIANCE',
+  ];
   const targets = priorityIds.map((id) => getInstrumentById(id));
   await Promise.allSettled(
     targets.flatMap((inst) => [

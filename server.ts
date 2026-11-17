@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
 import fs from 'fs';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -14,6 +15,8 @@ import {
   getInstrumentById,
   prewarmPriorityFeeds,
 } from './server/marketData.ts';
+import { attachBinanceWsHub } from './server/binanceWsHub.ts';
+import { evaluatePineStrategyLive, runPineBacktest } from './server/pineEngine.ts';
 import { evaluateMultiTimeframeStrategy } from './server/strategyEngine.ts';
 import {
   analyzeUploadedChartWithGemini,
@@ -398,6 +401,88 @@ app.post('/api/ai/auto-scan', async (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/pine/backtest', async (req: Request, res: Response) => {
+  try {
+    const {
+      strategyName,
+      instrumentId,
+      timeframe,
+      pineCode,
+      quantity,
+      initialCapital,
+      stopLossPct,
+      takeProfitPct,
+    } = req.body ?? {};
+
+    if (!pineCode || typeof pineCode !== 'string' || pineCode.trim().length < 5) {
+      res.status(400).json({ error: 'Valid Pine Script source code is required.' });
+      return;
+    }
+
+    const tf: Timeframe = ['5m', '15m', '1h', '4h', '1d'].includes(timeframe)
+      ? (timeframe as Timeframe)
+      : '5m';
+
+    const result = await runPineBacktest({
+      strategyName: typeof strategyName === 'string' ? strategyName.slice(0, 100) : 'Pine Strategy',
+      instrumentId: String(instrumentId || 'XAUUSD'),
+      timeframe: tf,
+      pineCode: pineCode.slice(0, 30_000),
+      quantity: Number(quantity) || 1,
+      initialCapital: Number(initialCapital) || 100_000,
+      stopLossPct: Number(stopLossPct) || 0.6,
+      takeProfitPct: Number(takeProfitPct) || 1.2,
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({
+      available: false,
+      error: err instanceof Error ? err.message : 'Pine backtest execution failed',
+    });
+  }
+});
+
+app.post('/api/pine/evaluate-live', async (req: Request, res: Response) => {
+  try {
+    const {
+      strategyId,
+      strategyName,
+      instrumentId,
+      timeframe,
+      pineCode,
+      stopLossPct,
+      takeProfitPct,
+    } = req.body ?? {};
+
+    if (!pineCode || typeof pineCode !== 'string') {
+      res.status(400).json({ error: 'Pine Script source code is required.' });
+      return;
+    }
+
+    const tf: Timeframe = ['5m', '15m', '1h', '4h', '1d'].includes(timeframe)
+      ? (timeframe as Timeframe)
+      : '5m';
+
+    const result = await evaluatePineStrategyLive({
+      strategyId: String(strategyId || 'custom'),
+      strategyName: typeof strategyName === 'string' ? strategyName.slice(0, 100) : 'Pine Bot',
+      instrumentId: String(instrumentId || 'XAUUSD'),
+      timeframe: tf,
+      pineCode: pineCode.slice(0, 30_000),
+      stopLossPct: Number(stopLossPct) || 0.6,
+      takeProfitPct: Number(takeProfitPct) || 1.2,
+    });
+
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({
+      available: false,
+      error: err instanceof Error ? err.message : 'Live Pine evaluation failed',
+    });
+  }
+});
+
 app.post('/api/ai/analyze-chart', async (req: Request, res: Response) => {
   try {
     const { imageBase64, mimeType, instrumentId, timeframe, currentPrice, optionType, expiry, strategyConfig } =
@@ -689,8 +774,11 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`SHARAN server listening on http://0.0.0.0:${PORT}`);
+  const httpServer = http.createServer(app);
+  attachBinanceWsHub(httpServer);
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
+    console.log(`SHARAN server + /ws/market listening on http://0.0.0.0:${PORT}`);
     void prewarmPriorityFeeds();
     const keepWarmTimer = setInterval(() => {
       void prewarmPriorityFeeds();

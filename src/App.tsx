@@ -5,6 +5,7 @@ import {
   BookOpen,
   CandlestickChart,
   Cloud,
+  Code2,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -13,15 +14,20 @@ import {
   Send,
   Settings,
   ShieldAlert,
+  UserCog,
   X,
 } from 'lucide-react';
 import {
   INSTRUMENTS,
+  type AccountProfileSettings,
   type ChatMessageRecord,
   type DemoWalletState,
   type ExecutionOrderRecord,
   type GeneratedSignalPayload,
   type MarketQuoteResponse,
+  type PineBotActivityLog,
+  type PineBotEvaluationResult,
+  type PineStrategyRecord,
   type StoredTradeSignal,
   type StrategyConfig,
   type TelegramLogRecord,
@@ -37,17 +43,22 @@ import {
   clearChatHistory,
   closeTradeEntry,
   createExecutionOrder,
+  createOrUpdatePineStrategy,
   createStoredSignal,
   createTelegramLog,
   createTradeEntry,
+  deletePineStrategy,
   deleteTradeEntry,
   ensureUserProfileAndConfig,
   markSignalTelegramPublished,
   resetDemoWallet,
+  saveAccountSettings,
   saveStrategyConfig,
+  subscribeAccountSettings,
   subscribeChatMessages,
   subscribeDemoWallet,
   subscribeExecutionOrders,
+  subscribePineStrategies,
   subscribeSignals,
   subscribeStrategyConfig,
   subscribeTelegramLogs,
@@ -63,17 +74,22 @@ import {
   createLocalSignal,
   createLocalTelegramLog,
   createLocalTrade,
+  deleteLocalPineStrategy,
   deleteLocalTrade,
+  loadLocalAccountProfile,
   loadLocalChat,
   loadLocalConfig,
   loadLocalOrders,
+  loadLocalPineStrategies,
   loadLocalSignals,
   loadLocalTelegramLogs,
   loadLocalTrades,
   loadLocalWallet,
   markLocalSignalTelegramPublished,
   resetLocalDemoWallet,
+  saveLocalAccountProfile,
   saveLocalConfig,
+  saveLocalPineStrategy,
   updateLocalSignalStatus,
 } from './lib/localStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -89,27 +105,37 @@ import { ChatbotView } from './components/ChatbotView';
 import { TradeJournalView } from './components/TradeJournalView';
 import { ExecutionTelegramView } from './components/ExecutionTelegramView';
 import { AdminSettingsView } from './components/AdminSettingsView';
+import { AccountSettingsView } from './components/AccountSettingsView';
+import { PineStrategyBotView } from './components/PineStrategyBotView';
 import { OrderExecutionModal } from './components/OrderExecutionModal';
 import { BrokerConnectModal } from './components/BrokerConnectModal';
+import { ClassicLandingPage } from './components/ClassicLandingPage';
+import { AccountOnboardingView } from './components/AccountOnboardingView';
+
+type ViewStage = 'landing' | 'onboarding' | 'workspace';
 
 type NavTab =
   | 'dashboard'
   | 'terminal'
   | 'watchlist'
+  | 'pine-bot'
   | 'chart-bot'
   | 'chatbot'
   | 'journal'
   | 'execution'
+  | 'account'
   | 'settings';
 
 const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'terminal', label: 'Terminal', icon: CandlestickChart },
   { id: 'watchlist', label: 'Watchlist', icon: Activity },
+  { id: 'pine-bot', label: 'Pine Strategy & Bot', icon: Code2 },
   { id: 'chart-bot', label: 'Chart AI', icon: ScanSearch },
   { id: 'chatbot', label: 'AI Assistant', icon: MessageSquare },
   { id: 'journal', label: 'Trade Journal', icon: BookOpen },
   { id: 'execution', label: 'Telegram & Orders', icon: Send },
+  { id: 'account', label: 'Account Settings', icon: UserCog },
   { id: 'settings', label: 'Admin Settings', icon: Settings },
 ];
 
@@ -119,11 +145,22 @@ function TerminalWorkspace() {
   const [authLoading, setAuthLoading] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  const [viewStage, setViewStage] = useState<ViewStage>('landing');
+  const [justCompletedMode, setJustCompletedMode] = useState<'BROKER' | 'DEMO' | null>(null);
+  const redirectAfterLoginRef = useRef(false);
+
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Standalone localStorage state (immediate access without requiring any app connection)
   const [config, setConfig] = useState<StrategyConfig>(() => loadLocalConfig());
+  const [accountProfile, setAccountProfile] = useState<AccountProfileSettings>(() =>
+    loadLocalAccountProfile()
+  );
+  const [pineStrategies, setPineStrategies] = useState<PineStrategyRecord[]>(() =>
+    loadLocalPineStrategies()
+  );
+  const [pineBotLogs, setPineBotLogs] = useState<PineBotActivityLog[]>([]);
   const [demoWallet, setDemoWallet] = useState<DemoWalletState>(() => loadLocalWallet());
   const [signals, setSignals] = useState<StoredTradeSignal[]>(() => loadLocalSignals());
   const [trades, setTrades] = useState<TradeJournalEntry[]>(() => loadLocalTrades());
@@ -134,8 +171,12 @@ function TerminalWorkspace() {
   const [orders, setOrders] = useState<ExecutionOrderRecord[]>(() => loadLocalOrders());
 
   // Market & Live Signal state
-  const [selectedInstrumentId, setSelectedInstrumentId] = useState('NIFTY50');
-  const [timeframe, setTimeframe] = useState<Timeframe>('5m');
+  const [selectedInstrumentId, setSelectedInstrumentId] = useState(
+    () => loadLocalAccountProfile().defaultInstrumentId || 'NIFTY50'
+  );
+  const [timeframe, setTimeframe] = useState<Timeframe>(
+    () => loadLocalAccountProfile().defaultTimeframe || '5m'
+  );
   const [liveStreaming, setLiveStreaming] = useState(true);
   const [quote, setQuote] = useState<MarketQuoteResponse | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -167,6 +208,9 @@ function TerminalWorkspace() {
   const tradesRef = useRef<TradeJournalEntry[]>(trades);
   tradesRef.current = trades;
   const autoExecutedKeysRef = useRef<Set<string>>(new Set());
+  const pineBotExecutedKeysRef = useRef<Set<string>>(new Set());
+  const pineStrategiesRef = useRef<PineStrategyRecord[]>(pineStrategies);
+  pineStrategiesRef.current = pineStrategies;
 
   const [livePricesBySymbol, setLivePricesBySymbol] = useState<Record<string, LivePricePoint>>({});
   const [autoScanResults, setAutoScanResults] = useState<AutoScanMarketItem[]>([]);
@@ -212,6 +256,8 @@ function TerminalWorkspace() {
     if (!authReady) return;
     if (!user) {
       setConfig(loadLocalConfig());
+      setAccountProfile(loadLocalAccountProfile());
+      setPineStrategies(loadLocalPineStrategies());
       setDemoWallet(loadLocalWallet());
       setSignals(loadLocalSignals());
       setTrades(loadLocalTrades());
@@ -222,6 +268,18 @@ function TerminalWorkspace() {
     }
 
     const unsubConfig = subscribeStrategyConfig(user.uid, setConfig);
+    const unsubAccount = subscribeAccountSettings(user.uid, (settings, existsInDb) => {
+      setAccountProfile(settings);
+      if (redirectAfterLoginRef.current) {
+        redirectAfterLoginRef.current = false;
+        if (!existsInDb || !settings.onboardingCompleted) {
+          setViewStage('onboarding');
+        } else {
+          setViewStage('landing');
+        }
+      }
+    });
+    const unsubPine = subscribePineStrategies(user.uid, setPineStrategies);
     const unsubWallet = subscribeDemoWallet(user.uid, setDemoWallet);
     const unsubSignals = subscribeSignals(user.uid, setSignals);
     const unsubTrades = subscribeTrades(user.uid, setTrades);
@@ -230,6 +288,8 @@ function TerminalWorkspace() {
     const unsubOrders = subscribeExecutionOrders(user.uid, setOrders);
     return () => {
       unsubConfig();
+      unsubAccount();
+      unsubPine();
       unsubWallet();
       unsubSignals();
       unsubTrades();
@@ -295,23 +355,52 @@ function TerminalWorkspace() {
     ]
   );
 
-  // Initial fetch whenever instrument/timeframe changes
+  // Initial fetch whenever workspace opens or instrument/timeframe changes
   useEffect(() => {
+    if (viewStage !== 'workspace') return;
     refreshQuote({ silent: false });
-  }, [refreshQuote]);
+  }, [viewStage, refreshQuote]);
 
   // Fast 1.5-second live polling on Terminal while liveStreaming is active
   useEffect(() => {
-    if (activeTab !== 'terminal' || !liveStreaming) return;
+    if (viewStage !== 'workspace' || activeTab !== 'terminal' || !liveStreaming) return;
     const timer = window.setInterval(() => {
       refreshQuote({ silent: true });
     }, 1500);
     return () => window.clearInterval(timer);
-  }, [activeTab, liveStreaming, refreshQuote]);
+  }, [viewStage, activeTab, liveStreaming, refreshQuote]);
+
+  const handleLivePriceTick = useCallback((instrumentId: string, price: number) => {
+    const nowIso = new Date().toISOString();
+    setQuote((prev) => {
+      if (!prev || !prev.available || prev.instrument.id !== instrumentId) return prev;
+      const prevClose = prev.previousClose ?? prev.price ?? price;
+      const change = Number((price - prevClose).toFixed(4));
+      const changePercent = prevClose ? Number(((change / prevClose) * 100).toFixed(2)) : 0;
+      return {
+        ...prev,
+        price,
+        change,
+        changePercent,
+        marketTimestamp: nowIso,
+      };
+    });
+    setLivePricesBySymbol((prev) => {
+      const prevEntry = prev[instrumentId];
+      return {
+        ...prev,
+        [instrumentId]: {
+          price,
+          changePercent: prevEntry?.changePercent ?? 0,
+          marketTimestamp: nowIso,
+        },
+      };
+    });
+  }, []);
 
   // Keep live LTP map warm for all instruments with open trades
   useEffect(() => {
-    if (activeTab !== 'dashboard' && activeTab !== 'terminal') return;
+    if (viewStage !== 'workspace' || (activeTab !== 'dashboard' && activeTab !== 'terminal')) return;
     const syncOpenTradesLtp = async () => {
       const openIds = new Set<string>();
       for (const t of tradesRef.current) {
@@ -360,13 +449,94 @@ function TerminalWorkspace() {
   const handleSignIn = async () => {
     setAuthError(null);
     setAuthLoading(true);
+    redirectAfterLoginRef.current = true;
     try {
       await signInWithGoogle();
     } catch (err) {
+      redirectAfterLoginRef.current = false;
       setAuthError(err instanceof Error ? err.message : 'Google sync failed');
     } finally {
       setAuthLoading(false);
     }
+  };
+
+  const handleConnectBrokerOnboarding = async (params: {
+    brokerProviderLabel: string;
+    displayName: string;
+    email: string;
+    mobileNumber: string;
+  }) => {
+    const nextProfile: AccountProfileSettings = {
+      ...accountProfile,
+      displayName: params.displayName || accountProfile.displayName,
+      email: params.email || accountProfile.email,
+      mobileNumber: params.mobileNumber || accountProfile.mobileNumber,
+      accountMode: 'BROKER',
+      onboardingCompleted: true,
+    };
+    const { userId: _u, updatedAt: _t, ...restConfig } = config;
+    const nextConfig = {
+      ...restConfig,
+      brokerProviderLabel: params.brokerProviderLabel.slice(0, 80),
+    };
+
+    if (user) {
+      await Promise.all([
+        saveAccountSettings(user.uid, nextProfile),
+        saveStrategyConfig(user.uid, nextConfig),
+      ]);
+    } else {
+      setAccountProfile(saveLocalAccountProfile(nextProfile));
+      setConfig(saveLocalConfig(nextConfig));
+    }
+
+    setJustCompletedMode('BROKER');
+    setViewStage('landing');
+  };
+
+  const handleCreateDemoOnboarding = async (params: {
+    displayName: string;
+    mobileNumber: string;
+    email: string;
+    startingCapital: number;
+    defaultInstrumentId: string;
+    defaultTimeframe: Timeframe;
+    riskProfile: 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';
+  }) => {
+    const nextProfile: AccountProfileSettings = {
+      ...accountProfile,
+      displayName: params.displayName,
+      mobileNumber: params.mobileNumber,
+      email: params.email,
+      accountMode: 'DEMO',
+      onboardingCompleted: true,
+      defaultInstrumentId: params.defaultInstrumentId,
+      defaultTimeframe: params.defaultTimeframe,
+      riskProfile: params.riskProfile,
+    };
+    const { userId: _u, updatedAt: _t, ...restConfig } = config;
+    const nextConfig = {
+      ...restConfig,
+      brokerProviderLabel: 'SHARAN Paper Engine · Demo Active',
+      paperTradingOnly: true,
+    };
+
+    if (user) {
+      await Promise.all([
+        saveAccountSettings(user.uid, nextProfile),
+        saveStrategyConfig(user.uid, nextConfig),
+        resetDemoWallet(user.uid, params.startingCapital),
+      ]);
+    } else {
+      setAccountProfile(saveLocalAccountProfile(nextProfile));
+      setConfig(saveLocalConfig(nextConfig));
+      setDemoWallet(resetLocalDemoWallet(params.startingCapital));
+    }
+
+    setSelectedInstrumentId(params.defaultInstrumentId);
+    setTimeframe(params.defaultTimeframe);
+    setJustCompletedMode('DEMO');
+    setViewStage('landing');
   };
 
   const handleDispatchTelegram = async (payload: {
@@ -598,12 +768,14 @@ function TerminalWorkspace() {
     async (
       sig: GeneratedSignalPayload,
       isAuto = false,
-      orderType: 'MARKET' | 'LIMIT' = 'MARKET'
+      orderType: 'MARKET' | 'LIMIT' = 'MARKET',
+      quantityOverride?: number
     ): Promise<boolean> => {
       if (sig.direction === 'NO_TRADE' || sig.entryPrice <= 0 || config.killSwitchActive) {
         return false;
       }
 
+      const qty = Math.max(0.01, Number(quantityOverride) || 1);
       const mode: TradeMode =
         config.paperTradingOnly || !integrationStatus.brokerConfigured ? 'PAPER' : 'LIVE';
       const signalId = `sig-${Date.now()}-${sig.instrument.replace(/[^A-Z0-9]/gi, '')}`;
@@ -618,7 +790,7 @@ function TerminalWorkspace() {
           signalId,
           instrument: sig.instrument,
           contract: sig.contract,
-          quantity: 1,
+          quantity: qty,
           orderType,
           side: sig.direction,
           entryPrice: sig.entryPrice,
@@ -640,7 +812,7 @@ function TerminalWorkspace() {
         signalId,
         instrument: sig.instrument,
         contract: sig.contract,
-        quantity: 1,
+        quantity: qty,
         orderType,
         side: sig.direction,
         entryPrice: sig.entryPrice,
@@ -663,7 +835,7 @@ function TerminalWorkspace() {
         target1: sig.target1,
         target2: sig.target2,
         target3: sig.target3,
-        quantity: 1,
+        quantity: qty,
         status: 'OPEN' as const,
         result: 'OPEN' as const,
         pnl: 0,
@@ -688,6 +860,154 @@ function TerminalWorkspace() {
     },
     [config.killSwitchActive, config.paperTradingOnly, config.brokerProviderLabel, integrationStatus.brokerConfigured, user]
   );
+
+  const evaluatePineBotStrategy = useCallback(
+    async (strategy: PineStrategyRecord): Promise<PineBotEvaluationResult | null> => {
+      try {
+        const res = await fetch('/api/pine/evaluate-live', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            strategyId: strategy.id,
+            strategyName: strategy.name,
+            instrumentId: strategy.instrumentId,
+            timeframe: strategy.timeframe,
+            pineCode: strategy.pineCode,
+            stopLossPct: strategy.stopLossPct,
+            takeProfitPct: strategy.takeProfitPct,
+          }),
+        });
+        const evalRes = (await res.json()) as PineBotEvaluationResult;
+
+        if (!evalRes.available) {
+          setPineBotLogs((prev) =>
+            [
+              {
+                id: `plog-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                timestamp: new Date().toISOString(),
+                strategyName: strategy.name,
+                instrumentSymbol: strategy.instrumentId,
+                timeframe: strategy.timeframe,
+                action: 'ERROR' as const,
+                price: 0,
+                executed: false,
+                detail: evalRes.error || 'Market feed unavailable',
+              },
+              ...prev,
+            ].slice(0, 60)
+          );
+          return evalRes;
+        }
+
+        let didExecute = false;
+        let execDetail = evalRes.reason;
+
+        if (evalRes.action === 'BUY' || evalRes.action === 'SELL') {
+          const barKey = `${strategy.id}:${evalRes.barTime}:${evalRes.action}`;
+          if (
+            strategy.autoExecute &&
+            !config.killSwitchActive &&
+            !pineBotExecutedKeysRef.current.has(barKey)
+          ) {
+            pineBotExecutedKeysRef.current.add(barKey);
+            const sig: GeneratedSignalPayload = {
+              instrument: evalRes.instrument.symbol,
+              marketSegment: evalRes.instrument.segment,
+              contract: `${evalRes.instrument.symbol} [PINE BOT: ${strategy.name.slice(0, 24)}]`,
+              direction: evalRes.action,
+              entryTrigger: `Pine ${strategy.timeframe.toUpperCase()} trigger`,
+              entryPrice: evalRes.price,
+              stopLoss: evalRes.stopLoss,
+              target1: evalRes.target1,
+              target2: evalRes.target2,
+              riskReward: `1:${Number(
+                (strategy.takeProfitPct / Math.max(strategy.stopLossPct, 0.05)).toFixed(1)
+              )}`,
+              entryTimeframe: strategy.timeframe.toUpperCase(),
+              trendTimeframe: strategy.timeframe.toUpperCase(),
+              horizon: 'INTRADAY',
+              invalidationLevel: evalRes.stopLoss,
+              confirmationText: `[PINE BOT · ${strategy.name}] ${evalRes.reason}`,
+              status: 'ACTIVE',
+              qualityScore: 85,
+              checklist: [],
+              reasonsFor: [evalRes.reason],
+              reasonsAgainst: [],
+              formattedSignalText: `${strategy.name}: ${evalRes.action} ${evalRes.instrument.symbol} @ ${evalRes.price}`,
+              telegramReadyText: `SHARAN PINE BOT · ${strategy.name}\n${evalRes.action} ${evalRes.instrument.symbol} @ ${evalRes.price}\nSL: ${evalRes.stopLoss} | T1: ${evalRes.target1}`,
+            };
+
+            try {
+              didExecute = await executeSignalRecord(sig, true, 'MARKET', strategy.quantity);
+              execDetail = didExecute
+                ? `Auto-executed ${evalRes.action} ${strategy.quantity} qty @ ${evalRes.price}`
+                : evalRes.reason;
+            } catch (err) {
+              pineBotExecutedKeysRef.current.delete(barKey);
+              execDetail = err instanceof Error ? err.message : 'Bot execution rejected';
+            }
+          }
+        }
+
+        setPineBotLogs((prev) =>
+          [
+            {
+              id: `plog-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+              timestamp: evalRes.evaluatedAt,
+              strategyName: strategy.name,
+              instrumentSymbol: evalRes.instrument.symbol,
+              timeframe: strategy.timeframe,
+              action: evalRes.action,
+              price: evalRes.price,
+              executed: didExecute,
+              detail: execDetail,
+            },
+            ...prev,
+          ].slice(0, 60)
+        );
+
+        return evalRes;
+      } catch (err) {
+        setPineBotLogs((prev) =>
+          [
+            {
+              id: `plog-${Date.now()}`,
+              timestamp: new Date().toISOString(),
+              strategyName: strategy.name,
+              instrumentSymbol: strategy.instrumentId,
+              timeframe: strategy.timeframe,
+              action: 'ERROR' as const,
+              price: 0,
+              executed: false,
+              detail: err instanceof Error ? err.message : 'Pine evaluation error',
+            },
+            ...prev,
+          ].slice(0, 60)
+        );
+        return null;
+      }
+    },
+    [config.killSwitchActive, executeSignalRecord]
+  );
+
+  // Background Pine Bot live scanner every 12 seconds for any active bots
+  useEffect(() => {
+    const activeBots = pineStrategies.filter((s) => s.botEnabled);
+    if (activeBots.length === 0) return;
+
+    const runBots = async () => {
+      for (const s of pineStrategiesRef.current.filter((x) => x.botEnabled)) {
+        await evaluatePineBotStrategy(s);
+      }
+    };
+
+    void runBots();
+    const timer = window.setInterval(() => {
+      void runBots();
+    }, 12_000);
+
+    return () => window.clearInterval(timer);
+  }, [pineStrategies, evaluatePineBotStrategy]);
 
   const handleExecuteSignalInstant = async (sig: GeneratedSignalPayload) => {
     setExecutingInstrumentSymbol(sig.instrument);
@@ -793,14 +1113,14 @@ function TerminalWorkspace() {
 
   // Run initial 5-market auto-scan on load and every 20s when enabled across Dashboard & Terminal
   useEffect(() => {
-    if (activeTab !== 'dashboard' && activeTab !== 'terminal') return;
+    if (viewStage !== 'workspace' || (activeTab !== 'dashboard' && activeTab !== 'terminal')) return;
     void runAutoScanAndExecute();
     if (!autoScanEnabled) return;
     const timer = window.setInterval(() => {
       void runAutoScanAndExecute();
     }, 20_000);
     return () => window.clearInterval(timer);
-  }, [activeTab, autoScanEnabled, runAutoScanAndExecute]);
+  }, [viewStage, activeTab, autoScanEnabled, runAutoScanAndExecute]);
 
   const handleQuickCloseTrade = async (trade: TradeJournalEntry, exitPrice: number) => {
     const diff =
@@ -816,6 +1136,60 @@ function TerminalWorkspace() {
     }
   };
 
+  if (viewStage === 'onboarding') {
+    return (
+      <AccountOnboardingView
+        isSignedIn={Boolean(user)}
+        userEmail={user?.email || ''}
+        userDisplayName={user?.displayName || ''}
+        initialProfile={accountProfile}
+        currentBrokerLabel={config.brokerProviderLabel}
+        brokerReadiness={brokerReadiness}
+        onConnectBrokerAccount={handleConnectBrokerOnboarding}
+        onCreateDemoAccount={handleCreateDemoOnboarding}
+        onBackToLanding={() => setViewStage('landing')}
+        onSignOut={async () => {
+          await signOutUser();
+          setViewStage('landing');
+        }}
+      />
+    );
+  }
+
+  if (viewStage === 'landing') {
+    return (
+      <ClassicLandingPage
+        isSignedIn={Boolean(user)}
+        userEmail={user?.email || ''}
+        accountProfile={accountProfile}
+        brokerProviderLabel={config.brokerProviderLabel}
+        authLoading={authLoading}
+        authError={authError}
+        onDismissAuthError={() => setAuthError(null)}
+        onSignIn={handleSignIn}
+        onSignOut={signOutUser}
+        onStartOnboarding={() => {
+          setJustCompletedMode(null);
+          setViewStage('onboarding');
+        }}
+        onEnterDashboard={() => {
+          setActiveTab('dashboard');
+          setViewStage('workspace');
+        }}
+        onEnterTerminal={() => {
+          setActiveTab('terminal');
+          setViewStage('workspace');
+        }}
+        onEnterPineBot={() => {
+          setActiveTab('pine-bot');
+          setViewStage('workspace');
+        }}
+        justCompletedMode={justCompletedMode}
+        onDismissCompletedBanner={() => setJustCompletedMode(null)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[#090B0E] text-[#E6EDF3] flex flex-col">
       {/* Top Bar Contract: 3 clean zones separated by gap-8 */}
@@ -830,19 +1204,21 @@ function TerminalWorkspace() {
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
           <a
-            href="#terminal"
+            href="#landing"
             onClick={(e) => {
               e.preventDefault();
-              setActiveTab('dashboard');
+              setViewStage('landing');
             }}
-            className="font-display text-base font-bold tracking-tight text-white whitespace-nowrap shrink-0"
+            className="font-classic-serif text-lg font-semibold tracking-tight text-white whitespace-nowrap shrink-0"
           >
             SHARAN
           </a>
         </div>
 
-        <nav className="hidden lg:flex items-center gap-6 text-xs font-medium text-slate-400">
-          {NAV_ITEMS.slice(0, 5).map((item) => (
+        <nav className="hidden lg:flex items-center gap-5 text-xs font-medium text-slate-400">
+          {NAV_ITEMS.filter((i) =>
+            ['dashboard', 'terminal', 'watchlist', 'pine-bot', 'account'].includes(i.id)
+          ).map((item) => (
             <button
               key={item.id}
               onClick={() => setActiveTab(item.id)}
@@ -940,12 +1316,23 @@ function TerminalWorkspace() {
             <div className={config.paperTradingOnly ? 'text-sky-300' : 'text-amber-300'}>
               Mode: {config.paperTradingOnly ? 'Paper Trading' : 'Live + Paper'}
             </div>
-            <div className="font-mono-tabular text-emerald-300">
-              Demo Wallet: {demoWallet.balance.toLocaleString()}
-            </div>
+            {accountProfile.accountMode === 'BROKER' ? (
+              <div className="text-sky-300 truncate">Broker: {config.brokerProviderLabel}</div>
+            ) : (
+              <div className="font-mono-tabular text-emerald-300">
+                Demo Wallet: {demoWallet.balance.toLocaleString()}
+              </div>
+            )}
             <div className="text-slate-500">
               Storage: {user ? 'Google Cloud Sync' : 'Standalone Local'}
             </div>
+            <button
+              type="button"
+              onClick={() => setViewStage('landing')}
+              className="text-slate-300 hover:text-white underline underline-offset-4 block pt-1"
+            >
+              Return to Landing Page
+            </button>
             {config.killSwitchActive && (
               <div className="flex items-center gap-1.5 text-red-400 font-semibold">
                 <ShieldAlert className="w-3.5 h-3.5" />
@@ -1026,13 +1413,13 @@ function TerminalWorkspace() {
               savingSignal={savingSignal}
               sendingTelegram={sendingTelegram}
               telegramNote={telegramNote}
+              onLivePriceTick={handleLivePriceTick}
             />
           )}
 
           {activeTab === 'watchlist' && (
             <WatchlistView
               selectedInstrumentId={selectedInstrumentId}
-              activeInstrumentIds={config.activeInstruments}
               onSelectInstrument={(id) => {
                 setSelectedInstrumentId(id);
                 setActiveTab('terminal');
@@ -1170,6 +1557,83 @@ function TerminalWorkspace() {
                   setConfig(saveLocalConfig(next));
                 }
               }}
+            />
+          )}
+
+          {activeTab === 'pine-bot' && (
+            <PineStrategyBotView
+              strategies={pineStrategies}
+              onSaveStrategy={async (item) => {
+                if (user) {
+                  await createOrUpdatePineStrategy(user.uid, item);
+                } else {
+                  setPineStrategies(saveLocalPineStrategy(item));
+                }
+              }}
+              onDeleteStrategy={async (strategyId) => {
+                if (user) {
+                  await deletePineStrategy(strategyId);
+                } else {
+                  setPineStrategies(deleteLocalPineStrategy(strategyId));
+                }
+              }}
+              onToggleBot={async (strategy) => {
+                const toggled = { ...strategy, botEnabled: !strategy.botEnabled };
+                if (user) {
+                  await createOrUpdatePineStrategy(user.uid, toggled);
+                } else {
+                  setPineStrategies(saveLocalPineStrategy(toggled));
+                }
+              }}
+              onCheckLiveBotNow={evaluatePineBotStrategy}
+              botLogs={pineBotLogs}
+              killSwitchActive={config.killSwitchActive}
+            />
+          )}
+
+          {activeTab === 'account' && (
+            <AccountSettingsView
+              profile={accountProfile}
+              onSaveProfile={async (next) => {
+                if (user) {
+                  await saveAccountSettings(user.uid, next);
+                } else {
+                  setAccountProfile(saveLocalAccountProfile(next));
+                }
+              }}
+              userEmail={user?.email || ''}
+              isSignedIn={Boolean(user)}
+              onSignIn={handleSignIn}
+              onSignOut={signOutUser}
+              wallet={demoWallet}
+              onAddWalletFunds={async (amt, note) => {
+                if (user) {
+                  await addDemoWalletFunds(user.uid, demoWallet, amt, note);
+                } else {
+                  setDemoWallet(addLocalDemoFunds(amt, note));
+                }
+              }}
+              onResetWallet={async (amt) => {
+                if (user) {
+                  await resetDemoWallet(user.uid, amt);
+                } else {
+                  setDemoWallet(resetLocalDemoWallet(amt));
+                }
+              }}
+              config={config}
+              onToggleKillSwitch={async () => {
+                const { userId: _u, updatedAt: _t, ...rest } = config;
+                const next = { ...rest, killSwitchActive: !config.killSwitchActive };
+                if (user) {
+                  await saveStrategyConfig(user.uid, next);
+                } else {
+                  setConfig(saveLocalConfig(next));
+                }
+              }}
+              onOpenBrokerModal={() => setBrokerModalOpen(true)}
+              onSwitchAccountSetup={() => setViewStage('onboarding')}
+              trades={trades}
+              pineStrategies={pineStrategies}
             />
           )}
         </main>

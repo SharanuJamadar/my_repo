@@ -1,16 +1,21 @@
 import {
+  DEFAULT_ACCOUNT_PROFILE,
   DEFAULT_DEMO_WALLET,
   DEFAULT_STRATEGY_CONFIG,
+  INSTRUMENTS,
+  type AccountProfileSettings,
   type ChatMessageRecord,
   type DemoWalletState,
   type ExecutionOrderRecord,
   type GeneratedSignalPayload,
+  type PineStrategyRecord,
   type SignalStatus,
   type StoredTradeSignal,
   type StrategyConfig,
   type TelegramLogRecord,
   type TradeJournalEntry,
 } from '../types/trading';
+import { PINE_STRATEGY_TEMPLATES } from './pineTemplates';
 
 const KEYS = {
   config: 'sharan_strategy_config_v1',
@@ -20,6 +25,8 @@ const KEYS = {
   chat: 'sharan_chat_v1',
   telegram: 'sharan_telegram_logs_v1',
   orders: 'sharan_execution_orders_v1',
+  account: 'sharan_account_profile_v1',
+  pineStrategies: 'sharan_pine_strategies_v1',
 };
 
 function readJson<T>(key: string, fallback: T): T {
@@ -48,9 +55,19 @@ function makeId(prefix: string): string {
 
 export function loadLocalConfig(): StrategyConfig {
   const saved = readJson<Partial<StrategyConfig> | null>(KEYS.config, null);
+  const allIds = INSTRUMENTS.map((i) => i.id);
+  const savedIds = Array.isArray(saved?.activeInstruments) ? saved.activeInstruments : [];
+  // Upgrade legacy 14-market configs to include newly added Indian & International instruments
+  const mergedInstruments =
+    savedIds.length > 0 && savedIds.length <= 14
+      ? Array.from(new Set([...savedIds, ...allIds]))
+      : savedIds.length > 0
+        ? savedIds
+        : allIds;
   return {
     ...DEFAULT_STRATEGY_CONFIG,
     ...(saved || {}),
+    activeInstruments: mergedInstruments,
     userId: 'local-standalone',
   };
 }
@@ -307,3 +324,88 @@ export function resetLocalDemoWallet(newBalance = DEFAULT_DEMO_WALLET.balance): 
   writeJson(KEYS.wallet, next);
   return next;
 }
+
+export function loadLocalAccountProfile(): AccountProfileSettings {
+  const saved = readJson<Partial<AccountProfileSettings> | null>(KEYS.account, null);
+  return {
+    ...DEFAULT_ACCOUNT_PROFILE,
+    ...(saved || {}),
+  };
+}
+
+export function saveLocalAccountProfile(next: AccountProfileSettings): AccountProfileSettings {
+  const clean: AccountProfileSettings = {
+    displayName: next.displayName.trim().slice(0, 100) || DEFAULT_ACCOUNT_PROFILE.displayName,
+    email: (next.email || '').trim().slice(0, 200),
+    mobileNumber: (next.mobileNumber || '').trim().slice(0, 24),
+    accountMode: next.accountMode || 'UNDECIDED',
+    onboardingCompleted: Boolean(next.onboardingCompleted),
+    riskProfile: next.riskProfile,
+    defaultInstrumentId: next.defaultInstrumentId || 'XAUUSD',
+    defaultTimeframe: next.defaultTimeframe,
+    dailyLossLimit: Math.max(0, Number(next.dailyLossLimit) || 0),
+    telegramChatId: next.telegramChatId.trim().slice(0, 64),
+    tradeAlertsEnabled: Boolean(next.tradeAlertsEnabled),
+  };
+  writeJson(KEYS.account, clean);
+  return clean;
+}
+
+export function loadLocalPineStrategies(): PineStrategyRecord[] {
+  const saved = readJson<PineStrategyRecord[] | null>(KEYS.pineStrategies, null);
+  if (saved && Array.isArray(saved) && saved.length > 0) {
+    return saved;
+  }
+  const now = new Date().toISOString();
+  const seeded: PineStrategyRecord[] = PINE_STRATEGY_TEMPLATES.map((tpl, idx) => ({
+    id: `pine-tpl-${idx + 1}`,
+    userId: 'local-standalone',
+    name: tpl.name,
+    description: tpl.description,
+    instrumentId: tpl.instrumentId,
+    timeframe: tpl.timeframe,
+    pineCode: tpl.pineCode,
+    quantity: tpl.quantity,
+    initialCapital: 100_000,
+    stopLossPct: tpl.stopLossPct,
+    takeProfitPct: tpl.takeProfitPct,
+    executionMode: 'PAPER',
+    botEnabled: false,
+    autoExecute: true,
+    createdAt: now,
+    updatedAt: now,
+  }));
+  writeJson(KEYS.pineStrategies, seeded);
+  return seeded;
+}
+
+export function saveLocalPineStrategy(
+  item: Omit<PineStrategyRecord, 'id' | 'userId' | 'createdAt' | 'updatedAt'> & { id?: string }
+): PineStrategyRecord[] {
+  const existing = loadLocalPineStrategies();
+  const now = new Date().toISOString();
+  if (item.id && existing.some((x) => x.id === item.id)) {
+    const updated = existing.map((x) =>
+      x.id === item.id ? { ...x, ...item, updatedAt: now } : x
+    );
+    writeJson(KEYS.pineStrategies, updated);
+    return updated;
+  }
+  const record: PineStrategyRecord = {
+    ...item,
+    id: makeId('pine'),
+    userId: 'local-standalone',
+    createdAt: now,
+    updatedAt: now,
+  };
+  const updated = [record, ...existing].slice(0, 50);
+  writeJson(KEYS.pineStrategies, updated);
+  return updated;
+}
+
+export function deleteLocalPineStrategy(strategyId: string): PineStrategyRecord[] {
+  const updated = loadLocalPineStrategies().filter((x) => x.id !== strategyId);
+  writeJson(KEYS.pineStrategies, updated);
+  return updated;
+}
+

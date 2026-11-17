@@ -18,6 +18,7 @@ export interface InstrumentMeta {
   tradingViewSymbol: string;
   investingUrl: string;
   binanceSymbol?: string;
+  binanceFuturesSymbol?: string;
   bybitSymbol?: string;
   swissquotePair?: string;
   twelveDataSymbol?: string;
@@ -267,7 +268,7 @@ export const DEFAULT_DEMO_WALLET: Omit<DemoWalletState, 'userId'> = {
 };
 
 export const INSTRUMENTS: InstrumentMeta[] = [
-  // Indian Markets
+  // Indian Markets — Most Traded Indices & NSE F&O Leaders
   {
     id: 'NIFTY50',
     symbol: 'NIFTY 50',
@@ -301,6 +302,37 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     notes: 'Prioritizes ATM / near-ATM CE & PE options',
   },
   {
+    id: 'FINNIFTY',
+    symbol: 'FIN NIFTY',
+    name: 'Nifty Financial Services',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE',
+    supportsOptions: true,
+    strikeStep: 50,
+    lotSize: 65,
+    yahooSymbol: 'NIFTY_FIN_SERVICE.NS',
+    tradingViewSymbol: 'NSE:CNXFINANCE',
+    investingUrl: 'https://www.investing.com/indices/cnx-finance-chart',
+    twelveDataSymbol: 'FINNIFTY',
+    notes: 'Prioritizes ATM / near-ATM CE & PE options',
+  },
+  {
+    id: 'MIDCPNIFTY',
+    symbol: 'MIDCAP NIFTY',
+    name: 'Nifty Midcap Select Index',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE',
+    supportsOptions: true,
+    strikeStep: 25,
+    lotSize: 120,
+    yahooSymbol: 'NIFTY_MID_SELECT.NS',
+    tradingViewSymbol: 'NSE:NIFTYMIDCAP150',
+    investingUrl: 'https://www.investing.com/indices/nifty-midcap-select',
+    notes: 'High-volume NSE midcap index derivatives',
+  },
+  {
     id: 'SENSEX',
     symbol: 'SENSEX',
     name: 'BSE Sensex 30',
@@ -316,6 +348,126 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     twelveDataSymbol: 'SENSEX',
     notes: 'Prioritizes ATM / near-ATM CE & PE options',
   },
+  {
+    id: 'RELIANCE',
+    symbol: 'RELIANCE',
+    name: 'Reliance Industries Ltd',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 20,
+    lotSize: 500,
+    yahooSymbol: 'RELIANCE.NS',
+    tradingViewSymbol: 'NSE:RELIANCE',
+    investingUrl: 'https://www.investing.com/equities/reliance-industries',
+    notes: 'Top-volume NSE bluechip stock & F&O contract',
+  },
+  {
+    id: 'HDFCBANK',
+    symbol: 'HDFC BANK',
+    name: 'HDFC Bank Ltd',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 10,
+    lotSize: 550,
+    yahooSymbol: 'HDFCBANK.NS',
+    tradingViewSymbol: 'NSE:HDFCBANK',
+    investingUrl: 'https://www.investing.com/equities/hdfc-bank-ltd',
+    notes: 'Heavyweight Bank Nifty constituent & NSE F&O leader',
+  },
+  {
+    id: 'ICICIBANK',
+    symbol: 'ICICI BANK',
+    name: 'ICICI Bank Ltd',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 10,
+    lotSize: 700,
+    yahooSymbol: 'ICICIBANK.NS',
+    tradingViewSymbol: 'NSE:ICICIBANK',
+    investingUrl: 'https://www.investing.com/equities/icici-bank-ltd',
+    notes: 'Active NSE banking F&O stock',
+  },
+  {
+    id: 'SBIN',
+    symbol: 'SBIN',
+    name: 'State Bank of India',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 10,
+    lotSize: 750,
+    yahooSymbol: 'SBIN.NS',
+    tradingViewSymbol: 'NSE:SBIN',
+    investingUrl: 'https://www.investing.com/equities/state-bank-of-india',
+    notes: 'High-liquidity PSU banking leader',
+  },
+  {
+    id: 'INFY',
+    symbol: 'INFOSYS',
+    name: 'Infosys Ltd',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 20,
+    lotSize: 400,
+    yahooSymbol: 'INFY.NS',
+    tradingViewSymbol: 'NSE:INFY',
+    investingUrl: 'https://www.investing.com/equities/infosys',
+    notes: 'NSE IT bellwether & active F&O stock',
+  },
+  {
+    id: 'TCS',
+    symbol: 'TCS',
+    name: 'Tata Consultancy Services',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 50,
+    lotSize: 175,
+    yahooSymbol: 'TCS.NS',
+    tradingViewSymbol: 'NSE:TCS',
+    investingUrl: 'https://www.investing.com/equities/tata-consultancy-services',
+    notes: 'Large-cap IT benchmark & NSE F&O contract',
+  },
+  {
+    id: 'BHARTIARTL',
+    symbol: 'BHARTI AIRTEL',
+    name: 'Bharti Airtel Ltd',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 20,
+    lotSize: 475,
+    yahooSymbol: 'BHARTIARTL.NS',
+    tradingViewSymbol: 'NSE:BHARTIARTL',
+    investingUrl: 'https://www.investing.com/equities/bharti-airtel',
+    notes: 'Most traded Indian telecom equity & F&O',
+  },
+  {
+    id: 'AXISBANK',
+    symbol: 'AXIS BANK',
+    name: 'Axis Bank Ltd',
+    segment: 'INDIAN',
+    currency: '₹',
+    exchangeLabel: 'NSE F&O',
+    supportsOptions: true,
+    strikeStep: 10,
+    lotSize: 625,
+    yahooSymbol: 'AXISBANK.NS',
+    tradingViewSymbol: 'NSE:AXISBANK',
+    investingUrl: 'https://www.investing.com/equities/axis-bank',
+    notes: 'High-beta private banking F&O leader',
+  },
   // MCX Commodities
   {
     id: 'MCX_GOLD',
@@ -329,9 +481,10 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     yahooSymbol: 'GC=F',
     tradingViewSymbol: 'COMEX:GC1!',
     investingUrl: 'https://www.investing.com/commodities/gold-streaming-chart',
+    binanceFuturesSymbol: 'XAUUSDT',
     swissquotePair: 'XAU/USD',
     twelveDataSymbol: 'XAU/USD',
-    notes: 'Live Gold benchmark feed with real-time spot sync',
+    notes: 'Binance Futures XAUUSDT live stream + spot sync',
   },
   {
     id: 'MCX_SILVER',
@@ -345,9 +498,10 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     yahooSymbol: 'SI=F',
     tradingViewSymbol: 'COMEX:SI1!',
     investingUrl: 'https://www.investing.com/commodities/silver-streaming-chart',
+    binanceFuturesSymbol: 'XAGUSDT',
     swissquotePair: 'XAG/USD',
     twelveDataSymbol: 'XAG/USD',
-    notes: 'Live Silver benchmark feed with real-time spot sync',
+    notes: 'Binance Futures XAGUSDT live stream + spot sync',
   },
   {
     id: 'MCX_CRUDEOIL',
@@ -395,7 +549,7 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     twelveDataSymbol: 'HG/USD',
     notes: 'Live Copper benchmark feed',
   },
-  // International Markets
+  // International Markets — Global Metals, US Indices, Major FX & Crypto
   {
     id: 'XAUUSD',
     symbol: 'XAUUSD',
@@ -408,6 +562,7 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     yahooSymbol: 'GC=F',
     tradingViewSymbol: 'OANDA:XAUUSD',
     investingUrl: 'https://www.investing.com/currencies/xau-usd-chart',
+    binanceFuturesSymbol: 'XAUUSDT',
     swissquotePair: 'XAU/USD',
     twelveDataSymbol: 'XAU/USD',
   },
@@ -423,6 +578,7 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     yahooSymbol: 'SI=F',
     tradingViewSymbol: 'OANDA:XAGUSD',
     investingUrl: 'https://www.investing.com/currencies/xag-usd-chart',
+    binanceFuturesSymbol: 'XAGUSDT',
     swissquotePair: 'XAG/USD',
     twelveDataSymbol: 'XAG/USD',
   },
@@ -441,6 +597,99 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     twelveDataSymbol: 'WTI/USD',
     ema9Priority: true,
     notes: 'EMA 9 special momentum weighting enabled',
+  },
+  {
+    id: 'NAS100',
+    symbol: 'NASDAQ 100',
+    name: 'E-Mini Nasdaq-100 Futures',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'CME / US TECH',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'NQ=F',
+    tradingViewSymbol: 'NASDAQ:NDX',
+    investingUrl: 'https://www.investing.com/indices/nq-100',
+    twelveDataSymbol: 'NDX',
+    notes: 'Most traded US tech index benchmark',
+  },
+  {
+    id: 'SPX500',
+    symbol: 'S&P 500',
+    name: 'E-Mini S&P 500 Futures',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'CME / US500',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'ES=F',
+    tradingViewSymbol: 'SP:SPX',
+    investingUrl: 'https://www.investing.com/indices/us-spx-500',
+    twelveDataSymbol: 'SPX',
+    notes: 'Global institutional equity benchmark',
+  },
+  {
+    id: 'US30',
+    symbol: 'DOW JONES',
+    name: 'E-Mini Dow 30 Futures (US30)',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'CBOT / US30',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'YM=F',
+    tradingViewSymbol: 'DJ:DJI',
+    investingUrl: 'https://www.investing.com/indices/us-30',
+    twelveDataSymbol: 'DJI',
+    notes: 'US30 industrial index benchmark',
+  },
+  {
+    id: 'EURUSD',
+    symbol: 'EUR/USD',
+    name: 'Euro / US Dollar Spot FX',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'FOREX MAJOR',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'EURUSD=X',
+    tradingViewSymbol: 'FX:EURUSD',
+    investingUrl: 'https://www.investing.com/currencies/eur-usd',
+    swissquotePair: 'EUR/USD',
+    twelveDataSymbol: 'EUR/USD',
+    notes: 'World most liquid forex pair + Swissquote BBO sync',
+  },
+  {
+    id: 'GBPUSD',
+    symbol: 'GBP/USD',
+    name: 'British Pound / US Dollar Spot FX',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'FOREX MAJOR',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'GBPUSD=X',
+    tradingViewSymbol: 'FX:GBPUSD',
+    investingUrl: 'https://www.investing.com/currencies/gbp-usd',
+    swissquotePair: 'GBP/USD',
+    twelveDataSymbol: 'GBP/USD',
+    notes: 'London/NY session forex major + Swissquote BBO sync',
+  },
+  {
+    id: 'USDJPY',
+    symbol: 'USD/JPY',
+    name: 'US Dollar / Japanese Yen Spot FX',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'FOREX MAJOR',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'USDJPY=X',
+    tradingViewSymbol: 'FX:USDJPY',
+    investingUrl: 'https://www.investing.com/currencies/usd-jpy',
+    swissquotePair: 'USD/JPY',
+    twelveDataSymbol: 'USD/JPY',
+    notes: 'Tokyo/NY forex benchmark + Swissquote BBO sync',
   },
   {
     id: 'BTCUSDT',
@@ -490,6 +739,38 @@ export const INSTRUMENTS: InstrumentMeta[] = [
     bybitSymbol: 'SOLUSDT',
     twelveDataSymbol: 'SOL/USD',
   },
+  {
+    id: 'BNBUSDT',
+    symbol: 'BNBUSDT',
+    name: 'BNB / Tether Perpetual',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'CRYPTO',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'BNB-USD',
+    tradingViewSymbol: 'BINANCE:BNBUSDT',
+    investingUrl: 'https://www.investing.com/crypto/bnb/bnb-usd-chart',
+    binanceSymbol: 'BNBUSDT',
+    bybitSymbol: 'BNBUSDT',
+    twelveDataSymbol: 'BNB/USD',
+  },
+  {
+    id: 'XRPUSDT',
+    symbol: 'XRPUSDT',
+    name: 'XRP / Tether Perpetual',
+    segment: 'INTERNATIONAL',
+    currency: '$',
+    exchangeLabel: 'CRYPTO',
+    supportsOptions: false,
+    lotSize: 1,
+    yahooSymbol: 'XRP-USD',
+    tradingViewSymbol: 'BINANCE:XRPUSDT',
+    investingUrl: 'https://www.investing.com/crypto/xrp/xrp-usd-chart',
+    binanceSymbol: 'XRPUSDT',
+    bybitSymbol: 'XRPUSDT',
+    twelveDataSymbol: 'XRP/USD',
+  },
 ];
 
 export const DEFAULT_STRATEGY_CONFIG: Omit<StrategyConfig, 'userId'> = {
@@ -514,3 +795,141 @@ export const DEFAULT_STRATEGY_CONFIG: Omit<StrategyConfig, 'userId'> = {
   killSwitchActive: false,
   activeInstruments: INSTRUMENTS.map((i) => i.id),
 };
+
+export interface AccountProfileSettings {
+  displayName: string;
+  email: string;
+  mobileNumber: string;
+  accountMode: 'UNDECIDED' | 'BROKER' | 'DEMO';
+  onboardingCompleted: boolean;
+  riskProfile: 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE';
+  defaultInstrumentId: string;
+  defaultTimeframe: Timeframe;
+  dailyLossLimit: number;
+  telegramChatId: string;
+  tradeAlertsEnabled: boolean;
+}
+
+export const DEFAULT_ACCOUNT_PROFILE: AccountProfileSettings = {
+  displayName: 'Sharan Trader',
+  email: '',
+  mobileNumber: '',
+  accountMode: 'UNDECIDED',
+  onboardingCompleted: false,
+  riskProfile: 'BALANCED',
+  defaultInstrumentId: 'XAUUSD',
+  defaultTimeframe: '5m',
+  dailyLossLimit: 5000,
+  telegramChatId: '',
+  tradeAlertsEnabled: true,
+};
+
+export interface PineStrategyRecord {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  instrumentId: string;
+  timeframe: Timeframe;
+  pineCode: string;
+  quantity: number;
+  initialCapital: number;
+  stopLossPct: number;
+  takeProfitPct: number;
+  executionMode: TradeMode;
+  botEnabled: boolean;
+  autoExecute: boolean;
+  createdAt: any;
+  updatedAt: any;
+}
+
+export interface PineBacktestTrade {
+  id: string;
+  side: 'BUY' | 'SELL';
+  entryTime: number;
+  exitTime: number;
+  entryPrice: number;
+  exitPrice: number;
+  quantity: number;
+  pnl: number;
+  returnPct: number;
+  exitReason: 'TAKE_PROFIT' | 'STOP_LOSS' | 'SIGNAL_REVERSE' | 'END_OF_SERIES';
+  note: string;
+}
+
+export interface PineOverlaySeries {
+  label: string;
+  color: string;
+  points: { time: number; value: number }[];
+}
+
+export interface PineParsedSummary {
+  scriptTitle: string;
+  pineVersion: string;
+  indicatorsDetected: string[];
+  buyRuleSummary: string;
+  sellRuleSummary: string;
+  unsupportedConstructs: string[];
+}
+
+export interface PineBacktestResult {
+  available: boolean;
+  error?: string;
+  strategyName: string;
+  instrument: InstrumentMeta;
+  timeframe: Timeframe;
+  provider: string;
+  marketTimestamp: string;
+  candlesCount: number;
+  parsed: PineParsedSummary;
+  candles: CandleBar[];
+  overlays: PineOverlaySeries[];
+  trades: PineBacktestTrade[];
+  equityCurve: { time: number; equity: number }[];
+  metrics: {
+    initialCapital: number;
+    finalEquity: number;
+    netProfit: number;
+    netProfitPct: number;
+    totalTrades: number;
+    winningTrades: number;
+    losingTrades: number;
+    winRatePct: number;
+    profitFactor: number;
+    maxDrawdownPct: number;
+    avgWin: number;
+    avgLoss: number;
+  };
+}
+
+export interface PineBotEvaluationResult {
+  available: boolean;
+  error?: string;
+  strategyId: string;
+  strategyName: string;
+  instrument: InstrumentMeta;
+  timeframe: Timeframe;
+  evaluatedAt: string;
+  barTime: number;
+  price: number;
+  action: 'BUY' | 'SELL' | 'HOLD';
+  stopLoss: number;
+  target1: number;
+  target2: number;
+  reason: string;
+  indicatorSnapshot: Record<string, number | string>;
+  parsed: PineParsedSummary;
+}
+
+export interface PineBotActivityLog {
+  id: string;
+  timestamp: string;
+  strategyName: string;
+  instrumentSymbol: string;
+  timeframe: Timeframe;
+  action: 'BUY' | 'SELL' | 'HOLD' | 'ERROR';
+  price: number;
+  executed: boolean;
+  detail: string;
+}
+

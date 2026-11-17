@@ -15,12 +15,16 @@ import {
 } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import {
+  DEFAULT_ACCOUNT_PROFILE,
   DEFAULT_DEMO_WALLET,
   DEFAULT_STRATEGY_CONFIG,
+  INSTRUMENTS,
+  type AccountProfileSettings,
   type ChatMessageRecord,
   type DemoWalletState,
   type ExecutionOrderRecord,
   type GeneratedSignalPayload,
+  type PineStrategyRecord,
   type SignalStatus,
   type StoredTradeSignal,
   type StrategyConfig,
@@ -98,7 +102,21 @@ export function subscribeStrategyConfig(
     ref,
     (snap) => {
       if (snap.exists()) {
-        onData({ ...(DEFAULT_STRATEGY_CONFIG as StrategyConfig), ...(snap.data() as StrategyConfig), userId });
+        const raw = snap.data() as StrategyConfig;
+        const allIds = INSTRUMENTS.map((i) => i.id);
+        const savedIds = Array.isArray(raw.activeInstruments) ? raw.activeInstruments : [];
+        const mergedInstruments =
+          savedIds.length > 0 && savedIds.length <= 14
+            ? Array.from(new Set([...savedIds, ...allIds]))
+            : savedIds.length > 0
+              ? savedIds
+              : allIds;
+        onData({
+          ...(DEFAULT_STRATEGY_CONFIG as StrategyConfig),
+          ...raw,
+          activeInstruments: mergedInstruments,
+          userId,
+        });
       } else {
         onData({ ...DEFAULT_STRATEGY_CONFIG, userId });
       }
@@ -136,7 +154,7 @@ export async function saveStrategyConfig(
         dataProviderLabel: clampString(config.dataProviderLabel, 80),
         brokerProviderLabel: clampString(config.brokerProviderLabel, 80),
         killSwitchActive: Boolean(config.killSwitchActive),
-        activeInstruments: (config.activeInstruments || []).slice(0, 20),
+        activeInstruments: (config.activeInstruments || []).slice(0, 50),
         updatedAt: serverTimestamp(),
       },
       { merge: false }
@@ -542,3 +560,123 @@ export async function resetDemoWallet(
     handleFirestoreError(err, OperationType.WRITE, `demoWallets/${userId}`);
   }
 }
+
+export function subscribeAccountSettings(
+  userId: string,
+  onData: (settings: AccountProfileSettings, existsInDb?: boolean) => void
+): Unsubscribe {
+  const ref = doc(db, 'accountSettings', userId);
+  return onSnapshot(
+    ref,
+    (snap) => {
+      if (snap.exists()) {
+        const d = snap.data() as Partial<AccountProfileSettings>;
+        onData(
+          {
+            ...DEFAULT_ACCOUNT_PROFILE,
+            ...d,
+          },
+          true
+        );
+      } else {
+        onData({ ...DEFAULT_ACCOUNT_PROFILE }, false);
+      }
+    },
+    (err) => handleFirestoreError(err, OperationType.GET, `accountSettings/${userId}`)
+  );
+}
+
+export async function saveAccountSettings(
+  userId: string,
+  settings: AccountProfileSettings
+): Promise<void> {
+  const ref = doc(db, 'accountSettings', userId);
+  try {
+    await setDoc(ref, {
+      userId,
+      displayName: clampString(settings.displayName, 100) || 'Sharan Trader',
+      email: clampString(settings.email || '', 200),
+      mobileNumber: clampString(settings.mobileNumber || '', 24),
+      accountMode: settings.accountMode || 'UNDECIDED',
+      onboardingCompleted: Boolean(settings.onboardingCompleted),
+      riskProfile: settings.riskProfile,
+      defaultInstrumentId: clampString(settings.defaultInstrumentId, 40) || 'XAUUSD',
+      defaultTimeframe: settings.defaultTimeframe,
+      dailyLossLimit: Math.max(0, Number(settings.dailyLossLimit) || 0),
+      telegramChatId: clampString(settings.telegramChatId, 64),
+      tradeAlertsEnabled: Boolean(settings.tradeAlertsEnabled),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `accountSettings/${userId}`);
+  }
+}
+
+export function subscribePineStrategies(
+  userId: string,
+  onData: (items: PineStrategyRecord[]) => void
+): Unsubscribe {
+  const q = query(collection(db, 'pineStrategies'), where('userId', '==', userId), limit(60));
+  return onSnapshot(
+    q,
+    (snap) => {
+      const items: PineStrategyRecord[] = snap.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<PineStrategyRecord, 'id'>),
+      }));
+      items.sort((a, b) => toMillis(b.updatedAt) - toMillis(a.updatedAt));
+      onData(items);
+    },
+    (err) => handleFirestoreError(err, OperationType.LIST, 'pineStrategies')
+  );
+}
+
+export async function createOrUpdatePineStrategy(
+  userId: string,
+  strategy: Omit<PineStrategyRecord, 'id' | 'userId' | 'createdAt' | 'updatedAt'> & {
+    id?: string;
+    createdAt?: any;
+  }
+): Promise<string> {
+  try {
+    const cleanPayload = {
+      userId,
+      name: clampString(strategy.name, 120) || 'Custom Pine Strategy',
+      description: clampString(strategy.description, 400),
+      instrumentId: clampString(strategy.instrumentId, 40) || 'XAUUSD',
+      timeframe: strategy.timeframe,
+      pineCode: (strategy.pineCode || '').slice(0, 30_000),
+      quantity: Math.max(0.01, Number(strategy.quantity) || 1),
+      initialCapital: Math.max(100, Number(strategy.initialCapital) || 100_000),
+      stopLossPct: Math.max(0.05, Math.min(50, Number(strategy.stopLossPct) || 0.6)),
+      takeProfitPct: Math.max(0.05, Math.min(200, Number(strategy.takeProfitPct) || 1.2)),
+      executionMode: strategy.executionMode,
+      botEnabled: Boolean(strategy.botEnabled),
+      autoExecute: Boolean(strategy.autoExecute),
+      updatedAt: serverTimestamp(),
+    };
+
+    if (strategy.id && !strategy.id.startsWith('pine-')) {
+      const ref = doc(db, 'pineStrategies', strategy.id);
+      await updateDoc(ref, cleanPayload);
+      return strategy.id;
+    }
+
+    const docRef = await addDoc(collection(db, 'pineStrategies'), {
+      ...cleanPayload,
+      createdAt: serverTimestamp(),
+    });
+    return docRef.id;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'pineStrategies');
+  }
+}
+
+export async function deletePineStrategy(strategyId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(db, 'pineStrategies', strategyId));
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `pineStrategies/${strategyId}`);
+  }
+}
+

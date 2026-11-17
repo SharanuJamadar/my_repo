@@ -17,9 +17,37 @@
     font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
   }
 
+  .font-classic-serif {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+
   .font-mono-tabular {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
     font-variant-numeric: tabular-nums;
+  }
+}
+
+@keyframes ticker-scroll {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.animate-ticker-marquee {
+  animation: ticker-scroll 42s linear infinite;
+  will-change: transform;
+}
+
+.animate-ticker-marquee:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-ticker-marquee {
+    animation: none;
   }
 }
 

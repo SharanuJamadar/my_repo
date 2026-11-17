@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { ArrowUpRight, RefreshCw } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowUpRight, Pause, Play, RefreshCw } from 'lucide-react';
 import {
   INSTRUMENTS,
   type MarketQuoteResponse,
@@ -9,55 +9,231 @@ import {
 interface WatchlistViewProps {
   selectedInstrumentId: string;
   onSelectInstrument: (id: string) => void;
-  activeInstrumentIds: string[];
 }
 
 export const WatchlistView: React.FC<WatchlistViewProps> = ({
   selectedInstrumentId,
   onSelectInstrument,
-  activeInstrumentIds,
 }) => {
   const [segment, setSegment] = useState<'ALL' | MarketSegment>('ALL');
   const [quotes, setQuotes] = useState<Record<string, MarketQuoteResponse>>({});
+  const [tickDirections, setTickDirections] = useState<Record<string, 'UP' | 'DOWN' | null>>({});
   const [loading, setLoading] = useState(false);
+  const [liveStreamEnabled, setLiveStreamEnabled] = useState(true);
+  const [wsConnected, setWsConnected] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const prevPricesRef = useRef<Record<string, number>>({});
 
-  const loadWatchlist = async () => {
-    setLoading(true);
+  const loadWatchlist = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent ?? false;
+    if (!silent) setLoading(true);
     try {
-      const res = await fetch(`/api/market/watchlist?timeframe=15m`);
+      const res = await fetch('/api/market/watchlist?timeframe=15m');
       if (!res.ok) return;
       const json = await res.json();
-      const map: Record<string, MarketQuoteResponse> = {};
-      for (const item of json.items || []) {
-        map[item.instrument.id] = item;
-      }
-      setQuotes(map);
-      setLastUpdated(json.fetchedAt || new Date().toISOString());
-    } finally {
-      setLoading(false);
-    }
-  };
+      const dirs: Record<string, 'UP' | 'DOWN' | null> = {};
+      const nextMap: Record<string, MarketQuoteResponse> = {};
 
-  useEffect(() => {
-    loadWatchlist();
+      for (const item of json.items || []) {
+        const id = item.instrument?.id;
+        if (!id) continue;
+        nextMap[id] = item;
+        if (item.available && typeof item.price === 'number') {
+          const prev = prevPricesRef.current[id];
+          if (typeof prev === 'number' && prev !== item.price) {
+            dirs[id] = item.price > prev ? 'UP' : 'DOWN';
+          }
+          prevPricesRef.current[id] = item.price;
+        }
+      }
+
+      setQuotes((prev) => ({ ...prev, ...nextMap }));
+      if (Object.keys(dirs).length > 0) {
+        setTickDirections((prev) => ({ ...prev, ...dirs }));
+      }
+      setLastUpdated(json.fetchedAt || new Date().toISOString());
+    } catch {
+      // Preserve last fetched watchlist silently on transient errors
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, []);
+
+  // Initial load + 3-second silent polling for all markets (NSE, BSE, MCX, US Oil, Crypto)
+  useEffect(() => {
+    void loadWatchlist({ silent: false });
+    if (!liveStreamEnabled) return;
+    const pollTimer = window.setInterval(() => {
+      void loadWatchlist({ silent: true });
+    }, 3000);
+    return () => window.clearInterval(pollTimer);
+  }, [liveStreamEnabled, loadWatchlist]);
+
+  // Real-time Binance WebSocket tick stream for all Binance-linked markets in Watchlist
+  useEffect(() => {
+    if (!liveStreamEnabled) {
+      setWsConnected(false);
+      return;
+    }
+
+    let disposed = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | null = null;
+    let retryMs = 1500;
+    const pendingBySym = new Map<string, { price: number; ts: number }>();
+
+    const connect = () => {
+      if (disposed) return;
+      const wsProto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      try {
+        socket = new WebSocket(`${wsProto}//${window.location.host}/ws/market?instrument=ALL`);
+      } catch {
+        reconnectTimer = window.setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 1.5, 8000);
+        return;
+      }
+
+      socket.onopen = () => {
+        if (disposed) {
+          socket?.close();
+          return;
+        }
+        retryMs = 1500;
+        setWsConnected(true);
+      };
+
+      socket.onmessage = (ev) => {
+        try {
+          const msg = JSON.parse(ev.data) as {
+            type?: string;
+            streamSymbol?: string;
+            price?: number;
+            ts?: number;
+            ticks?: { streamSymbol: string; price: number; ts: number }[];
+          };
+
+          if ((msg.type === 'ticks' || msg.type === 'snapshot') && Array.isArray(msg.ticks)) {
+            for (const t of msg.ticks) {
+              if (t?.streamSymbol && typeof t.price === 'number' && t.price > 0) {
+                pendingBySym.set(t.streamSymbol.toUpperCase(), {
+                  price: t.price,
+                  ts: typeof t.ts === 'number' ? t.ts : Date.now(),
+                });
+              }
+            }
+          } else if (
+            msg.type === 'tick' &&
+            msg.streamSymbol &&
+            typeof msg.price === 'number' &&
+            msg.price > 0
+          ) {
+            pendingBySym.set(msg.streamSymbol.toUpperCase(), {
+              price: msg.price,
+              ts: typeof msg.ts === 'number' ? msg.ts : Date.now(),
+            });
+          }
+        } catch {
+          // Ignore malformed WS payloads
+        }
+      };
+
+      socket.onclose = () => {
+        if (disposed) return;
+        setWsConnected(false);
+        reconnectTimer = window.setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 1.5, 8000);
+      };
+
+      socket.onerror = () => {
+        try {
+          socket?.close();
+        } catch {
+          // Ignore close error
+        }
+      };
+    };
+
+    connect();
+
+    // Flush batched Binance ticks onto Watchlist rows cleanly every 120ms
+    const flushTimer = window.setInterval(() => {
+      if (pendingBySym.size === 0) return;
+      const batch = new Map(pendingBySym);
+      pendingBySym.clear();
+
+      const matchingInsts = INSTRUMENTS.filter((inst) => {
+        const sym = (inst.binanceSymbol || inst.binanceFuturesSymbol || '').toUpperCase();
+        return sym && batch.has(sym);
+      });
+      if (matchingInsts.length === 0) return;
+
+      const dirs: Record<string, 'UP' | 'DOWN' | null> = {};
+      setQuotes((prevQuotes) => {
+        let changed = false;
+        const nextQuotes = { ...prevQuotes };
+
+        for (const inst of matchingInsts) {
+          const sym = (inst.binanceSymbol || inst.binanceFuturesSymbol || '').toUpperCase();
+          const tick = batch.get(sym);
+          const cur = prevQuotes[inst.id];
+          if (!tick || !cur || !cur.available) continue;
+
+          const oldPrice = prevPricesRef.current[inst.id] ?? cur.price;
+          if (oldPrice !== tick.price) {
+            dirs[inst.id] = oldPrice && tick.price > oldPrice ? 'UP' : 'DOWN';
+            prevPricesRef.current[inst.id] = tick.price;
+          }
+
+          const prevClose = cur.previousClose ?? cur.price ?? tick.price;
+          const change = Number((tick.price - prevClose).toFixed(4));
+          const changePercent = prevClose ? Number(((change / prevClose) * 100).toFixed(2)) : 0;
+
+          nextQuotes[inst.id] = {
+            ...cur,
+            price: tick.price,
+            change,
+            changePercent,
+            marketTimestamp: new Date(tick.ts).toISOString(),
+          };
+          changed = true;
+        }
+
+        return changed ? nextQuotes : prevQuotes;
+      });
+
+      if (Object.keys(dirs).length > 0) {
+        setTickDirections((prev) => ({ ...prev, ...dirs }));
+      }
+      setLastUpdated(new Date().toISOString());
+    }, 120);
+
+    return () => {
+      disposed = true;
+      window.clearInterval(flushTimer);
+      if (reconnectTimer !== null) window.clearTimeout(reconnectTimer);
+      try {
+        socket?.close();
+      } catch {
+        // Ignore cleanup close
+      }
+    };
+  }, [liveStreamEnabled]);
 
   const sections: { title: string; seg: MarketSegment; subtitle: string }[] = [
     {
       title: 'Indian Markets',
       seg: 'INDIAN',
-      subtitle: 'NSE & BSE Index Spots with ATM / Near-ATM CE & PE focus',
+      subtitle: 'NIFTY, BANK NIFTY, FIN NIFTY, MIDCAP NIFTY, SENSEX & Most-Traded NSE F&O Equities',
     },
     {
       title: 'MCX Commodities',
       seg: 'MCX',
-      subtitle: 'Metals & Energy (EMA 9 priority applied on Crude Oil)',
+      subtitle: 'Metals & Energy (Binance Futures live stream on Gold/Silver · EMA 9 priority on Crude Oil)',
     },
     {
       title: 'International Markets',
       seg: 'INTERNATIONAL',
-      subtitle: 'Global Precious Metals, WTI Crude, and Crypto Perpetuals',
+      subtitle: 'Precious Metals, WTI Crude, US Indices (NAS100/SPX500/US30), Major FX & Top Crypto Perpetuals',
     },
   ];
 
@@ -68,7 +244,15 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-semibold text-white">Market Watchlist</h2>
+          <div className="flex items-center gap-2.5">
+            <h2 className="text-xl font-semibold text-white">Market Watchlist</h2>
+            {liveStreamEnabled && (
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                {wsConnected ? 'WS + 3s Live' : 'Live 3s'}
+              </span>
+            )}
+          </div>
           <p className="text-xs text-slate-400 mt-0.5">
             {lastUpdated
               ? `15m Multi-Market Snapshot · Synced ${new Date(lastUpdated).toLocaleTimeString()}`
@@ -81,6 +265,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
             {(['ALL', 'INDIAN', 'MCX', 'INTERNATIONAL'] as const).map((tab) => (
               <button
                 key={tab}
+                type="button"
                 onClick={() => setSegment(tab)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                   segment === tab
@@ -100,7 +285,21 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
           </div>
 
           <button
-            onClick={loadWatchlist}
+            type="button"
+            onClick={() => setLiveStreamEnabled((v) => !v)}
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+              liveStreamEnabled
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-[#11141A] border-white/[0.08] text-slate-400'
+            }`}
+          >
+            {liveStreamEnabled ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+            {liveStreamEnabled ? 'Streaming ON' : 'Paused'}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => loadWatchlist({ silent: false })}
             disabled={loading}
             className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
@@ -111,9 +310,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
       </div>
 
       {visibleSections.map((sec) => {
-        const items = INSTRUMENTS.filter(
-          (i) => i.segment === sec.seg && (activeInstrumentIds.length === 0 || activeInstrumentIds.includes(i.id))
-        );
+        const items = INSTRUMENTS.filter((i) => i.segment === sec.seg);
         return (
           <div
             key={sec.seg}
@@ -148,6 +345,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                     const q = quotes[inst.id];
                     const isSelected = inst.id === selectedInstrumentId;
                     const pos = (q?.changePercent ?? 0) >= 0;
+                    const tickDir = tickDirections[inst.id];
                     const atmStrike =
                       q?.available && q.price && inst.strikeStep
                         ? Math.round(q.price / inst.strikeStep) * inst.strikeStep
@@ -167,7 +365,17 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                           </div>
                         </td>
 
-                        <td className="py-3 px-4 text-right font-mono-tabular font-semibold text-white">
+                        <td
+                          className={`py-3 px-4 text-right font-mono-tabular font-semibold transition-colors ${
+                            !q?.available
+                              ? 'text-white'
+                              : tickDir === 'UP'
+                                ? 'text-emerald-300'
+                                : tickDir === 'DOWN'
+                                  ? 'text-red-300'
+                                  : 'text-white'
+                          }`}
+                        >
                           {loading && !q ? (
                             <span className="text-slate-500">Loading...</span>
                           ) : q?.available && q.price !== undefined ? (
@@ -242,6 +450,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
 
                         <td className="py-3 px-4 text-right">
                           <button
+                            type="button"
                             onClick={() => onSelectInstrument(inst.id)}
                             className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
                           >

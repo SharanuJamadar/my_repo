@@ -40,7 +40,7 @@
         "dataProviderLabel": { "type": "string", "maxLength": 80 },
         "brokerProviderLabel": { "type": "string", "maxLength": 80 },
         "killSwitchActive": { "type": "boolean" },
-        "activeInstruments": { "type": "array", "maxLength": 20 },
+        "activeInstruments": { "type": "array", "maxLength": 50 },
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": [
@@ -195,6 +195,57 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userId", "balance", "totalAdded", "recentDeposits", "updatedAt"]
+    },
+    "AccountSettings": {
+      "title": "AccountSettings",
+      "description": "Trader profile preferences, contact details, onboarding mode, and risk limits",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 200 },
+        "mobileNumber": { "type": "string", "maxLength": 24 },
+        "accountMode": { "type": "string", "enum": ["UNDECIDED", "BROKER", "DEMO"] },
+        "onboardingCompleted": { "type": "boolean" },
+        "riskProfile": { "type": "string", "enum": ["CONSERVATIVE", "BALANCED", "AGGRESSIVE"] },
+        "defaultInstrumentId": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "defaultTimeframe": { "type": "string", "enum": ["5m", "15m", "1h", "4h", "1d"] },
+        "dailyLossLimit": { "type": "number" },
+        "telegramChatId": { "type": "string", "maxLength": 64 },
+        "tradeAlertsEnabled": { "type": "boolean" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "displayName", "riskProfile", "defaultInstrumentId",
+        "defaultTimeframe", "dailyLossLimit", "tradeAlertsEnabled", "updatedAt"
+      ]
+    },
+    "PineStrategy": {
+      "title": "PineStrategy",
+      "description": "Saved TradingView Pine Script strategy and live bot automation configuration",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 400 },
+        "instrumentId": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "timeframe": { "type": "string", "enum": ["5m", "15m", "1h", "4h", "1d"] },
+        "pineCode": { "type": "string", "minLength": 5, "maxLength": 30000 },
+        "quantity": { "type": "number" },
+        "initialCapital": { "type": "number" },
+        "stopLossPct": { "type": "number" },
+        "takeProfitPct": { "type": "number" },
+        "executionMode": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "botEnabled": { "type": "boolean" },
+        "autoExecute": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "name", "instrumentId", "timeframe", "pineCode",
+        "quantity", "initialCapital", "stopLossPct", "takeProfitPct",
+        "executionMode", "botEnabled", "autoExecute", "createdAt", "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -229,6 +280,15 @@
     "/demoWallets/{userId}": {
       "schema": { "$ref": "#/entities/DemoWallet" },
       "description": "User demo wallet capital and deposit history"
+    },
+    "/accountSettings/{userId}": {
+      "schema": { "$ref": "#/entities/AccountSettings" },
+      "description": "Trader account profile preferences and risk limits"
+    },
+    "/pineStrategies/{strategyId}": {
+      "schema": { "$ref": "#/entities/PineStrategy" },
+      "description": "User Pine Script strategies and live bot execution settings"
     }
   }
 }
+
