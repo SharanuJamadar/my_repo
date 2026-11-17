@@ -9,7 +9,11 @@ import {
   type StrategyConfig,
   type Timeframe,
 } from './src/types/trading.ts';
-import { fetchLiveMarketQuote, getInstrumentById } from './server/marketData.ts';
+import {
+  fetchLiveMarketQuote,
+  getInstrumentById,
+  prewarmPriorityFeeds,
+} from './server/marketData.ts';
 import { evaluateMultiTimeframeStrategy } from './server/strategyEngine.ts';
 import {
   analyzeUploadedChartWithGemini,
@@ -70,7 +74,7 @@ function sanitizeConfig(raw: any): StrategyConfig {
         : DEFAULT_STRATEGY_CONFIG.dataProviderLabel,
     brokerProviderLabel:
       typeof raw?.brokerProviderLabel === 'string'
-        ? raw.brokerProviderLabel
+        ? raw.brokerProviderLabel.slice(0, 80)
         : DEFAULT_STRATEGY_CONFIG.brokerProviderLabel,
     killSwitchActive:
       typeof raw?.killSwitchActive === 'boolean'
@@ -139,6 +143,32 @@ function isValidTelegramTarget(val?: unknown): val is string {
   return /^-?\d{5,20}$/.test(trimmed) || /^@[a-zA-Z0-9_]{3,64}$/.test(trimmed);
 }
 
+function getBrokerReadinessMap(): Record<string, boolean> {
+  return {
+    PAPER_ENGINE: true,
+    GROWW: Boolean(process.env.GROWW_API_TOKEN),
+    EXNESS: Boolean(process.env.EXNESS_BRIDGE_URL && process.env.EXNESS_API_TOKEN),
+    UPSTOX: Boolean(process.env.UPSTOX_ACCESS_TOKEN),
+    ZERODHA: Boolean(process.env.KITE_API_KEY && process.env.KITE_ACCESS_TOKEN),
+    DHAN: Boolean(process.env.DHAN_CLIENT_ID && process.env.DHAN_ACCESS_TOKEN),
+    ANGELONE: Boolean(process.env.ANGEL_API_KEY),
+    BINANCE: Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_API_SECRET),
+  };
+}
+
+function hasAnyLiveBrokerConfigured(): boolean {
+  if (process.env.BROKER_API_KEY && process.env.BROKER_API_SECRET) return true;
+  const map = getBrokerReadinessMap();
+  return Object.entries(map).some(([k, v]) => k !== 'PAPER_ENGINE' && v);
+}
+
+app.get('/api/brokers/status', (_req: Request, res: Response) => {
+  res.json({
+    brokers: getBrokerReadinessMap(),
+    anyLiveBrokerConfigured: hasAnyLiveBrokerConfigured(),
+  });
+});
+
 app.get('/api/integrations/status', async (_req: Request, res: Response) => {
   const tgToken = process.env.TELEGRAM_BOT_TOKEN;
   const botUsername = await getTelegramBotUsername(tgToken);
@@ -150,7 +180,7 @@ app.get('/api/integrations/status', async (_req: Request, res: Response) => {
     telegramChatConfigured: hasChat,
     telegramBotUsername: botUsername,
     twelveDataConfigured: Boolean(process.env.TWELVE_DATA_API_KEY),
-    brokerConfigured: Boolean(process.env.BROKER_API_KEY && process.env.BROKER_API_SECRET),
+    brokerConfigured: hasAnyLiveBrokerConfigured(),
     publicFeedsActive: ['Binance Live Spot API', 'Bybit Live Spot API', 'Yahoo Live Feed', 'Swissquote Spot'],
   });
 });
@@ -273,6 +303,97 @@ app.post('/api/ai/analyze-live', async (req: Request, res: Response) => {
   } catch (err) {
     res.status(500).json({
       error: err instanceof Error ? err.message : 'Live analysis failed',
+    });
+  }
+});
+
+app.post('/api/ai/auto-scan', async (req: Request, res: Response) => {
+  try {
+    const requestedIds: string[] =
+      Array.isArray(req.body?.instrumentIds) && req.body.instrumentIds.length > 0
+        ? req.body.instrumentIds.map((x: unknown) => String(x)).slice(0, 10)
+        : ['XAUUSD', 'NIFTY50', 'XAGUSD', 'BTCUSDT', 'MCX_CRUDEOIL'];
+
+    const config = sanitizeConfig(req.body?.strategyConfig);
+    const emaPeriods = {
+      fast: config.emaFast,
+      mid: config.emaMid,
+      slow: config.emaSlow,
+      rsi: config.rsiPeriod,
+    };
+
+    const results = await Promise.all(
+      requestedIds.map(async (instId) => {
+        const instrument = getInstrumentById(instId);
+        try {
+          const [trendQuote, entryQuote] = await Promise.all([
+            fetchLiveMarketQuote(instrument.id, config.trendTimeframe, emaPeriods),
+            fetchLiveMarketQuote(instrument.id, config.entryTimeframe, emaPeriods),
+          ]);
+
+          if (
+            !trendQuote.available ||
+            !entryQuote.available ||
+            !trendQuote.technicals ||
+            !entryQuote.technicals
+          ) {
+            return {
+              instrument,
+              quoteAvailable: false,
+              price: null,
+              changePercent: null,
+              marketTimestamp: null,
+              trend15m: 'UNAVAILABLE',
+              trend5m: 'UNAVAILABLE',
+              rsi5m: null,
+              ema9: null,
+              signal: null,
+            };
+          }
+
+          const signal = evaluateMultiTimeframeStrategy({
+            instrument,
+            trendQuote,
+            entryQuote,
+            config,
+          });
+
+          return {
+            instrument,
+            quoteAvailable: true,
+            price: entryQuote.price ?? null,
+            changePercent: entryQuote.changePercent ?? 0,
+            marketTimestamp: entryQuote.marketTimestamp,
+            trend15m: trendQuote.technicals.trendBias,
+            trend5m: entryQuote.technicals.trendBias,
+            rsi5m: entryQuote.technicals.rsi,
+            ema9: entryQuote.technicals.ema9,
+            signal,
+          };
+        } catch {
+          return {
+            instrument,
+            quoteAvailable: false,
+            price: null,
+            changePercent: null,
+            marketTimestamp: null,
+            trend15m: 'UNAVAILABLE',
+            trend5m: 'UNAVAILABLE',
+            rsi5m: null,
+            ema9: null,
+            signal: null,
+          };
+        }
+      })
+    );
+
+    res.json({
+      scannedAt: new Date().toISOString(),
+      results,
+    });
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Auto-scan failed',
     });
   }
 });
@@ -508,11 +629,11 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
     }
 
     if (executionMode === 'LIVE') {
-      if (!process.env.BROKER_API_KEY || !process.env.BROKER_API_SECRET) {
+      if (!hasAnyLiveBrokerConfigured()) {
         res.status(503).json({
           status: 'REJECTED',
           error:
-            'Live broker credentials (BROKER_API_KEY / BROKER_API_SECRET) are not configured on the server. Keep mode on PAPER TRADING or configure authorized broker adapter credentials.',
+            'Live broker API credentials are not configured on the server. Keep mode on PAPER TRADING or configure authorized broker adapter credentials.',
         });
         return;
       }
@@ -522,7 +643,7 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       res.json({
         status: 'SUBMITTED_LIVE',
         brokerOrderId: liveOrderId,
-        brokerName: brokerName || 'Authorized Broker Adapter',
+        brokerName: String(brokerName || 'Authorized Broker Adapter').slice(0, 80),
         message: `Live order ${liveOrderId} queued for ${contract} (${quantity} qty @ ${orderType}).`,
       });
       return;
@@ -533,7 +654,7 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
     res.json({
       status: 'CONFIRMED_PAPER',
       brokerOrderId: paperOrderId,
-      brokerName: 'SHARAN Paper Trading Engine',
+      brokerName: String(brokerName || 'SHARAN Paper Trading Engine').slice(0, 80),
       message: `Paper order ${paperOrderId} recorded for ${contract} (${side} ${quantity} qty, SL ${stopLoss}, Target ${targetPrice}${expiry ? `, Exp ${expiry}` : ''}).`,
     });
   } catch (err) {
@@ -570,6 +691,13 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`SHARAN server listening on http://0.0.0.0:${PORT}`);
+    void prewarmPriorityFeeds();
+    const keepWarmTimer = setInterval(() => {
+      void prewarmPriorityFeeds();
+    }, 35_000);
+    if (typeof keepWarmTimer.unref === 'function') {
+      keepWarmTimer.unref();
+    }
   });
 }
 

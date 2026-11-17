@@ -108,6 +108,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
   const hasFitRef = useRef<boolean>(false);
+  const lastStructureKeyRef = useRef<string>('');
+  const lastLevelsKeyRef = useRef<string>('');
 
   const [chartMode, setChartMode] = useState<ChartMode>('SHARAN_LIVE');
   const [showEmas, setShowEmas] = useState(true);
@@ -129,9 +131,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
   const hasChartData = Boolean(quote?.available && uniqueCandles.length > 0);
 
-  // Reset initial viewport fit when switching instrument or timeframe
+  // Reset initial viewport fit and incremental keys when switching instrument or timeframe
   useEffect(() => {
     hasFitRef.current = false;
+    lastStructureKeyRef.current = '';
+    lastLevelsKeyRef.current = '';
   }, [instrument.id, timeframe, chartMode]);
 
   // 1. Initialize chart instance only when structural layout changes (prevents 4s live-tick flicker)
@@ -233,6 +237,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       emaSlowRef.current = null;
       vwapSeriesRef.current = null;
       chartRef.current = null;
+      lastStructureKeyRef.current = '';
+      lastLevelsKeyRef.current = '';
       chart.remove();
     };
   }, [
@@ -247,7 +253,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     config.emaSlow,
   ]);
 
-  // 2. Smoothly stream new candle / price / overlay updates without resetting zoom
+  // 2. Fast O(1) incremental live tick update vs full dataset reset on instrument/timeframe change
   useEffect(() => {
     if (
       chartMode !== 'SHARAN_LIVE' ||
@@ -260,124 +266,156 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
 
     const candleSeries = candleSeriesRef.current;
+    const lastBar = uniqueCandles[uniqueCandles.length - 1];
+    const structureKey = `${chartMode}:${instrument.id}:${timeframe}:${showEmas}:${showVwap}:${config.emaFast}:${config.emaMid}:${config.emaSlow}:${uniqueCandles.length}:${uniqueCandles[0].time}:${lastBar.time}`;
 
-    candleSeries.setData(
-      uniqueCandles.map((c) => ({
-        time: c.time as UTCTimestamp,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      }))
-    );
-
-    if (showEmas) {
-      emaFastRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaFast));
-      emaMidRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaMid));
-      emaSlowRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaSlow));
-    }
-
-    if (showVwap) {
-      vwapSeriesRef.current?.setData(calcVwapPoints(uniqueCandles));
-    }
-
-    // Clear previous price lines cleanly before re-drawing latest S/R & Signal levels
-    for (const line of priceLinesRef.current) {
-      try {
-        candleSeries.removePriceLine(line);
-      } catch {
-        // ignore if already removed
-      }
-    }
-    priceLinesRef.current = [];
-
-    if (showLevels && quote.levels) {
-      priceLinesRef.current.push(
-        candleSeries.createPriceLine({
-          price: quote.levels.immediateResistance,
-          color: 'rgba(239, 68, 68, 0.65)',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: 'R1',
-        }),
-        candleSeries.createPriceLine({
-          price: quote.levels.immediateSupport,
-          color: 'rgba(16, 185, 129, 0.65)',
-          lineWidth: 1,
-          lineStyle: LineStyle.Dashed,
-          axisLabelVisible: true,
-          title: 'S1',
-        })
-      );
-    }
-
-    const markers: SeriesMarker<Time>[] = [];
-    if (
-      activeSignal &&
-      activeSignal.instrument === quote.instrument.symbol &&
-      activeSignal.direction !== 'NO_TRADE' &&
-      activeSignal.entryPrice > 0
-    ) {
-      priceLinesRef.current.push(
-        candleSeries.createPriceLine({
-          price: activeSignal.entryPrice,
-          color: '#38BDF8',
-          lineWidth: 2,
-          lineStyle: LineStyle.Solid,
-          axisLabelVisible: true,
-          title: `${activeSignal.direction} ENTRY`,
-        })
-      );
-
-      if (activeSignal.stopLoss > 0) {
-        priceLinesRef.current.push(
-          candleSeries.createPriceLine({
-            price: activeSignal.stopLoss,
-            color: '#EF4444',
-            lineWidth: 2,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: 'SL',
-          })
-        );
-      }
-      if (activeSignal.target1 > 0) {
-        priceLinesRef.current.push(
-          candleSeries.createPriceLine({
-            price: activeSignal.target1,
-            color: '#10B981',
-            lineWidth: 1,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: 'T1',
-          })
-        );
-      }
-      if (activeSignal.target2 > 0) {
-        priceLinesRef.current.push(
-          candleSeries.createPriceLine({
-            price: activeSignal.target2,
-            color: '#10B981',
-            lineWidth: 2,
-            lineStyle: LineStyle.Dotted,
-            axisLabelVisible: true,
-            title: 'T2',
-          })
-        );
-      }
-
-      const lastBar = uniqueCandles[uniqueCandles.length - 1];
-      markers.push({
+    if (lastStructureKeyRef.current === structureKey) {
+      // O(1) single-bar update on live tick — zero layout thrash
+      candleSeries.update({
         time: lastBar.time as UTCTimestamp,
-        position: activeSignal.direction === 'BUY' ? 'belowBar' : 'aboveBar',
-        color: activeSignal.direction === 'BUY' ? '#10B981' : '#EF4444',
-        shape: activeSignal.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
-        text: `${activeSignal.direction} @ ${activeSignal.entryPrice}`,
+        open: lastBar.open,
+        high: lastBar.high,
+        low: lastBar.low,
+        close: lastBar.close,
       });
+
+      if (showEmas) {
+        const fastPts = calcEmaPoints(uniqueCandles, config.emaFast);
+        const midPts = calcEmaPoints(uniqueCandles, config.emaMid);
+        const slowPts = calcEmaPoints(uniqueCandles, config.emaSlow);
+        if (fastPts.length) emaFastRef.current?.update(fastPts[fastPts.length - 1]);
+        if (midPts.length) emaMidRef.current?.update(midPts[midPts.length - 1]);
+        if (slowPts.length) emaSlowRef.current?.update(slowPts[slowPts.length - 1]);
+      }
+
+      if (showVwap) {
+        const vwapPts = calcVwapPoints(uniqueCandles);
+        if (vwapPts.length) vwapSeriesRef.current?.update(vwapPts[vwapPts.length - 1]);
+      }
+    } else {
+      candleSeries.setData(
+        uniqueCandles.map((c) => ({
+          time: c.time as UTCTimestamp,
+          open: c.open,
+          high: c.high,
+          low: c.low,
+          close: c.close,
+        }))
+      );
+
+      if (showEmas) {
+        emaFastRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaFast));
+        emaMidRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaMid));
+        emaSlowRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaSlow));
+      }
+
+      if (showVwap) {
+        vwapSeriesRef.current?.setData(calcVwapPoints(uniqueCandles));
+      }
+
+      lastStructureKeyRef.current = structureKey;
     }
 
-    markersPluginRef.current?.setMarkers(markers);
+    const levelsKey = `${showLevels}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${lastBar.time}`;
+
+    if (lastLevelsKeyRef.current !== levelsKey) {
+      for (const line of priceLinesRef.current) {
+        try {
+          candleSeries.removePriceLine(line);
+        } catch {
+          // ignore if already removed
+        }
+      }
+      priceLinesRef.current = [];
+
+      if (showLevels && quote.levels) {
+        priceLinesRef.current.push(
+          candleSeries.createPriceLine({
+            price: quote.levels.immediateResistance,
+            color: 'rgba(239, 68, 68, 0.65)',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'R1',
+          }),
+          candleSeries.createPriceLine({
+            price: quote.levels.immediateSupport,
+            color: 'rgba(16, 185, 129, 0.65)',
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: 'S1',
+          })
+        );
+      }
+
+      const markers: SeriesMarker<Time>[] = [];
+      if (
+        activeSignal &&
+        activeSignal.instrument === quote.instrument.symbol &&
+        activeSignal.direction !== 'NO_TRADE' &&
+        activeSignal.entryPrice > 0
+      ) {
+        priceLinesRef.current.push(
+          candleSeries.createPriceLine({
+            price: activeSignal.entryPrice,
+            color: '#38BDF8',
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `${activeSignal.direction} ENTRY`,
+          })
+        );
+
+        if (activeSignal.stopLoss > 0) {
+          priceLinesRef.current.push(
+            candleSeries.createPriceLine({
+              price: activeSignal.stopLoss,
+              color: '#EF4444',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: 'SL',
+            })
+          );
+        }
+        if (activeSignal.target1 > 0) {
+          priceLinesRef.current.push(
+            candleSeries.createPriceLine({
+              price: activeSignal.target1,
+              color: '#10B981',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: 'T1',
+            })
+          );
+        }
+        if (activeSignal.target2 > 0) {
+          priceLinesRef.current.push(
+            candleSeries.createPriceLine({
+              price: activeSignal.target2,
+              color: '#10B981',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: 'T2',
+            })
+          );
+        }
+
+        markers.push({
+          time: lastBar.time as UTCTimestamp,
+          position: activeSignal.direction === 'BUY' ? 'belowBar' : 'aboveBar',
+          color: activeSignal.direction === 'BUY' ? '#10B981' : '#EF4444',
+          shape: activeSignal.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
+          text: `${activeSignal.direction} @ ${activeSignal.entryPrice}`,
+        });
+      }
+
+      markersPluginRef.current?.setMarkers(markers);
+      lastLevelsKeyRef.current = levelsKey;
+    }
 
     if (!hasFitRef.current) {
       chartRef.current.timeScale().fitContent();
@@ -385,6 +423,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
   }, [
     chartMode,
+    instrument.id,
+    timeframe,
     quote,
     uniqueCandles,
     showEmas,
@@ -529,7 +569,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             }`}
           >
             {liveStreaming ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
-            {liveStreaming ? 'Live 4s' : 'Paused'}
+            {liveStreaming ? 'Live 1.5s' : 'Paused'}
           </button>
 
           <button

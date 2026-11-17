@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
   Activity,
   BookOpen,
   CandlestickChart,
   Cloud,
+  LayoutDashboard,
   LogOut,
   Menu,
   MessageSquare,
@@ -15,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import {
+  INSTRUMENTS,
   type ChatMessageRecord,
   type DemoWalletState,
   type ExecutionOrderRecord,
@@ -27,6 +29,7 @@ import {
   type TradeJournalEntry,
   type TradeMode,
 } from './types/trading';
+import { AUTO_SCAN_INSTRUMENT_IDS } from './lib/brokers';
 import { auth, signInWithGoogle, signOutUser } from './lib/firebase';
 import {
   addChatMessage,
@@ -74,7 +77,12 @@ import {
   updateLocalSignalStatus,
 } from './lib/localStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { DashboardView } from './components/DashboardView';
+import {
+  DashboardView,
+  type AutoScanMarketItem,
+  type LivePricePoint,
+} from './components/DashboardView';
+import { TerminalView } from './components/TerminalView';
 import { WatchlistView } from './components/WatchlistView';
 import { ChartAnalysisBotView } from './components/ChartAnalysisBotView';
 import { ChatbotView } from './components/ChatbotView';
@@ -82,9 +90,11 @@ import { TradeJournalView } from './components/TradeJournalView';
 import { ExecutionTelegramView } from './components/ExecutionTelegramView';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { OrderExecutionModal } from './components/OrderExecutionModal';
+import { BrokerConnectModal } from './components/BrokerConnectModal';
 
 type NavTab =
   | 'dashboard'
+  | 'terminal'
   | 'watchlist'
   | 'chart-bot'
   | 'chatbot'
@@ -93,7 +103,8 @@ type NavTab =
   | 'settings';
 
 const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
-  { id: 'dashboard', label: 'Terminal', icon: CandlestickChart },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'terminal', label: 'Terminal', icon: CandlestickChart },
   { id: 'watchlist', label: 'Watchlist', icon: Activity },
   { id: 'chart-bot', label: 'Chart AI', icon: ScanSearch },
   { id: 'chatbot', label: 'AI Assistant', icon: MessageSquare },
@@ -135,8 +146,12 @@ function TerminalWorkspace() {
   const [sendingTelegram, setSendingTelegram] = useState(false);
   const [telegramNote, setTelegramNote] = useState<string | null>(null);
 
-  // Order Modal & Integration readiness
+  // Order Modal, Broker Hub & Integration readiness
   const [orderModalSignal, setOrderModalSignal] = useState<GeneratedSignalPayload | null>(null);
+  const [brokerModalOpen, setBrokerModalOpen] = useState(false);
+  const [brokerReadiness, setBrokerReadiness] = useState<Record<string, boolean>>({
+    PAPER_ENGINE: true,
+  });
   const [integrationStatus, setIntegrationStatus] = useState({
     geminiConfigured: true,
     telegramConfigured: false,
@@ -146,6 +161,21 @@ function TerminalWorkspace() {
     brokerConfigured: false,
     publicFeedsActive: [] as string[],
   });
+
+  // 0ms client quote cache + live price map + 5-market auto-pilot state
+  const quoteCacheRef = useRef<Map<string, MarketQuoteResponse>>(new Map());
+  const tradesRef = useRef<TradeJournalEntry[]>(trades);
+  tradesRef.current = trades;
+  const autoExecutedKeysRef = useRef<Set<string>>(new Set());
+
+  const [livePricesBySymbol, setLivePricesBySymbol] = useState<Record<string, LivePricePoint>>({});
+  const [autoScanResults, setAutoScanResults] = useState<AutoScanMarketItem[]>([]);
+  const [autoScanLoading, setAutoScanLoading] = useState(false);
+  const [lastAutoScanAt, setLastAutoScanAt] = useState<string | null>(null);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
+  const [autoExecuteEnabled, setAutoExecuteEnabled] = useState(true);
+  const [autoPilotNote, setAutoPilotNote] = useState<string | null>(null);
+  const [executingInstrumentSymbol, setExecutingInstrumentSymbol] = useState<string | null>(null);
 
   // Optional Google Auth subscription (never blocks terminal access)
   useEffect(() => {
@@ -163,11 +193,17 @@ function TerminalWorkspace() {
     return () => unsub();
   }, []);
 
-  // Fetch server integration readiness (non-secret status)
+  // Fetch server integration & broker readiness (non-secret booleans)
   useEffect(() => {
     fetch('/api/integrations/status')
       .then((r) => r.json())
       .then((d) => setIntegrationStatus(d))
+      .catch(() => {});
+    fetch('/api/brokers/status')
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.brokers) setBrokerReadiness(d.brokers);
+      })
       .catch(() => {});
   }, []);
 
@@ -203,13 +239,19 @@ function TerminalWorkspace() {
     };
   }, [authReady, user]);
 
-  // Fetch live market quote for active instrument + timeframe
+  // Fetch live market quote with 0ms client cache for instant instrument/timeframe switching
   const refreshQuote = useCallback(
     async (options?: { silent?: boolean }) => {
       const silent = options?.silent ?? false;
-      if (!silent) {
+      const cacheKey = `${selectedInstrumentId}:${timeframe}`;
+      const cached = quoteCacheRef.current.get(cacheKey);
+      if (cached && !silent) {
+        setQuote(cached);
+        setQuoteLoading(false);
+      } else if (!silent) {
         setQuoteLoading(true);
       }
+
       try {
         const qs = new URLSearchParams({
           instrument: selectedInstrumentId,
@@ -221,9 +263,20 @@ function TerminalWorkspace() {
         });
         const res = await fetch(`/api/market/quote?${qs.toString()}`);
         const data = (await res.json()) as MarketQuoteResponse;
+        quoteCacheRef.current.set(cacheKey, data);
         setQuote(data);
+        if (data.available && typeof data.price === 'number') {
+          setLivePricesBySymbol((prev) => ({
+            ...prev,
+            [data.instrument.id]: {
+              price: data.price!,
+              changePercent: data.changePercent ?? 0,
+              marketTimestamp: data.marketTimestamp,
+            },
+          }));
+        }
       } catch {
-        if (!silent) {
+        if (!silent && !cached) {
           setQuote(null);
         }
       } finally {
@@ -247,14 +300,62 @@ function TerminalWorkspace() {
     refreshQuote({ silent: false });
   }, [refreshQuote]);
 
-  // Automatic 4-second live polling on Dashboard while liveStreaming is active
+  // Fast 1.5-second live polling on Terminal while liveStreaming is active
   useEffect(() => {
-    if (activeTab !== 'dashboard' || !liveStreaming) return;
+    if (activeTab !== 'terminal' || !liveStreaming) return;
     const timer = window.setInterval(() => {
       refreshQuote({ silent: true });
-    }, 4000);
+    }, 1500);
     return () => window.clearInterval(timer);
   }, [activeTab, liveStreaming, refreshQuote]);
+
+  // Keep live LTP map warm for all instruments with open trades
+  useEffect(() => {
+    if (activeTab !== 'dashboard' && activeTab !== 'terminal') return;
+    const syncOpenTradesLtp = async () => {
+      const openIds = new Set<string>();
+      for (const t of tradesRef.current) {
+        if (t.status !== 'OPEN') continue;
+        const norm = t.instrument.toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const meta = INSTRUMENTS.find(
+          (i) =>
+            i.id.toUpperCase().replace(/[^A-Z0-9]/g, '') === norm ||
+            i.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '') === norm ||
+            norm.includes(i.id.toUpperCase().replace(/[^A-Z0-9]/g, ''))
+        );
+        if (meta && meta.id !== selectedInstrumentId) openIds.add(meta.id);
+      }
+      if (openIds.size === 0) return;
+
+      const quotes = await Promise.all(
+        Array.from(openIds).map(async (id) => {
+          try {
+            const res = await fetch(`/api/market/quote?instrument=${id}&timeframe=5m`);
+            return res.ok ? ((await res.json()) as MarketQuoteResponse) : null;
+          } catch {
+            return null;
+          }
+        })
+      );
+      const patch: Record<string, LivePricePoint> = {};
+      for (const q of quotes) {
+        if (q?.available && typeof q.price === 'number') {
+          patch[q.instrument.id] = {
+            price: q.price,
+            changePercent: q.changePercent ?? 0,
+            marketTimestamp: q.marketTimestamp,
+          };
+        }
+      }
+      if (Object.keys(patch).length > 0) {
+        setLivePricesBySymbol((prev) => ({ ...prev, ...patch }));
+      }
+    };
+
+    void syncOpenTradesLtp();
+    const timer = window.setInterval(() => void syncOpenTradesLtp(), 4000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, selectedInstrumentId]);
 
   const handleSignIn = async () => {
     setAuthError(null);
@@ -492,6 +593,229 @@ function TerminalWorkspace() {
     }
   };
 
+  // Instant execution helper used both by manual 1-click "Execute Trade" and Auto-Execute engine
+  const executeSignalRecord = useCallback(
+    async (
+      sig: GeneratedSignalPayload,
+      isAuto = false,
+      orderType: 'MARKET' | 'LIMIT' = 'MARKET'
+    ): Promise<boolean> => {
+      if (sig.direction === 'NO_TRADE' || sig.entryPrice <= 0 || config.killSwitchActive) {
+        return false;
+      }
+
+      const mode: TradeMode =
+        config.paperTradingOnly || !integrationStatus.brokerConfigured ? 'PAPER' : 'LIVE';
+      const signalId = `sig-${Date.now()}-${sig.instrument.replace(/[^A-Z0-9]/gi, '')}`;
+      const brokerLabel =
+        config.brokerProviderLabel || 'SHARAN Paper Trading Engine';
+
+      const res = await fetch('/api/orders/execute', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user?.uid || 'local-standalone',
+          signalId,
+          instrument: sig.instrument,
+          contract: sig.contract,
+          quantity: 1,
+          orderType,
+          side: sig.direction,
+          entryPrice: sig.entryPrice,
+          stopLoss: sig.stopLoss,
+          targetPrice: sig.target1,
+          executionMode: mode,
+          brokerName: brokerLabel,
+          userConfirmed: true,
+          killSwitchActive: config.killSwitchActive,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Trade execution rejected.');
+      }
+
+      const orderPayload = {
+        signalId,
+        instrument: sig.instrument,
+        contract: sig.contract,
+        quantity: 1,
+        orderType,
+        side: sig.direction,
+        entryPrice: sig.entryPrice,
+        stopLoss: sig.stopLoss,
+        targetPrice: sig.target1,
+        executionMode: mode,
+        brokerName: data.brokerName || brokerLabel,
+        brokerOrderId: data.brokerOrderId,
+        status: data.status,
+      };
+
+      const journalPayload = {
+        signalId,
+        instrument: sig.instrument,
+        contract: sig.contract,
+        direction: sig.direction,
+        executionMode: mode,
+        entryPrice: sig.entryPrice,
+        stopLoss: sig.stopLoss,
+        target1: sig.target1,
+        target2: sig.target2,
+        target3: sig.target3,
+        quantity: 1,
+        status: 'OPEN' as const,
+        result: 'OPEN' as const,
+        pnl: 0,
+        riskReward: sig.riskReward,
+        strategyConfirmation: isAuto
+          ? `[AUTO-PILOT ${orderType}] ${sig.confirmationText}`
+          : sig.confirmationText,
+        brokerOrderId: data.brokerOrderId,
+      };
+
+      if (user) {
+        await createStoredSignal(user.uid, sig, 'LIVE_MARKET', false);
+        await createExecutionOrder(user.uid, orderPayload);
+        await createTradeEntry(user.uid, journalPayload);
+      } else {
+        setSignals(createLocalSignal(sig, 'LIVE_MARKET', false));
+        setOrders(createLocalOrder(orderPayload));
+        setTrades(createLocalTrade(journalPayload));
+      }
+
+      return true;
+    },
+    [config.killSwitchActive, config.paperTradingOnly, config.brokerProviderLabel, integrationStatus.brokerConfigured, user]
+  );
+
+  const handleExecuteSignalInstant = async (sig: GeneratedSignalPayload) => {
+    setExecutingInstrumentSymbol(sig.instrument);
+    setAutoPilotNote(null);
+    try {
+      await executeSignalRecord(sig, false, sig.status === 'ACTIVE' ? 'MARKET' : 'LIMIT');
+      setAutoPilotNote(
+        `Executed ${sig.direction} on ${sig.contract} @ ${sig.entryPrice} via ${config.brokerProviderLabel}.`
+      );
+    } catch (err) {
+      setAutoPilotNote(err instanceof Error ? err.message : 'Execution failed');
+    } finally {
+      setExecutingInstrumentSymbol(null);
+    }
+  };
+
+  const runAutoScanAndExecute = useCallback(async () => {
+    setAutoScanLoading(true);
+    try {
+      const res = await fetch('/api/ai/auto-scan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          instrumentIds: [...AUTO_SCAN_INSTRUMENT_IDS],
+          strategyConfig: config,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !Array.isArray(data.results)) return;
+
+      const scanned = data.results as AutoScanMarketItem[];
+      setAutoScanResults(scanned);
+      setLastAutoScanAt(data.scannedAt || new Date().toISOString());
+
+      // Sync latest live prices for all 5 scanned markets
+      const pricePatch: Record<string, LivePricePoint> = {};
+      for (const item of scanned) {
+        if (item.quoteAvailable && item.price !== null && item.marketTimestamp) {
+          pricePatch[item.instrument.id] = {
+            price: item.price,
+            changePercent: item.changePercent ?? 0,
+            marketTimestamp: item.marketTimestamp,
+          };
+        }
+      }
+      if (Object.keys(pricePatch).length > 0) {
+        setLivePricesBySymbol((prev) => ({ ...prev, ...pricePatch }));
+      }
+
+      // Auto-Execute qualifying ACTIVE or qualified LIMIT setups without duplicating open instruments
+      if (autoExecuteEnabled && !config.killSwitchActive) {
+        const executedNames: string[] = [];
+        for (const item of scanned) {
+          const sig = item.signal;
+          const isQualified =
+            sig &&
+            sig.direction !== 'NO_TRADE' &&
+            sig.entryPrice > 0 &&
+            (sig.status === 'ACTIVE' ||
+              (sig.status === 'WAIT' && sig.qualityScore >= config.minSetupScore));
+          if (!isQualified) {
+            continue;
+          }
+          const instNorm = item.instrument.symbol.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const idNorm = item.instrument.id.toUpperCase().replace(/[^A-Z0-9]/g, '');
+          const alreadyOpen = tradesRef.current.some((t) => {
+            if (t.status !== 'OPEN') return false;
+            const tNorm = t.instrument.toUpperCase().replace(/[^A-Z0-9]/g, '');
+            return tNorm === instNorm || tNorm === idNorm;
+          });
+          const sessionKey = `${item.instrument.id}:${sig.direction}`;
+          if (alreadyOpen || autoExecutedKeysRef.current.has(sessionKey)) {
+            continue;
+          }
+
+          autoExecutedKeysRef.current.add(sessionKey);
+          try {
+            const ok = await executeSignalRecord(
+              sig,
+              true,
+              sig.status === 'ACTIVE' ? 'MARKET' : 'LIMIT'
+            );
+            if (ok) {
+              executedNames.push(`${item.instrument.symbol} (${sig.direction})`);
+            }
+          } catch {
+            autoExecutedKeysRef.current.delete(sessionKey);
+          }
+        }
+
+        if (executedNames.length > 0) {
+          setAutoPilotNote(
+            `Auto-executed ${executedNames.join(', ')} into Live Running Trades.`
+          );
+        }
+      }
+    } catch {
+      // Preserve last scan table silently on transient poll errors
+    } finally {
+      setAutoScanLoading(false);
+    }
+  }, [config, autoExecuteEnabled, executeSignalRecord]);
+
+  // Run initial 5-market auto-scan on load and every 20s when enabled across Dashboard & Terminal
+  useEffect(() => {
+    if (activeTab !== 'dashboard' && activeTab !== 'terminal') return;
+    void runAutoScanAndExecute();
+    if (!autoScanEnabled) return;
+    const timer = window.setInterval(() => {
+      void runAutoScanAndExecute();
+    }, 20_000);
+    return () => window.clearInterval(timer);
+  }, [activeTab, autoScanEnabled, runAutoScanAndExecute]);
+
+  const handleQuickCloseTrade = async (trade: TradeJournalEntry, exitPrice: number) => {
+    const diff =
+      trade.direction === 'BUY' ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
+    const pnl = Number((diff * trade.quantity).toFixed(2));
+    const result: 'WIN' | 'LOSS' | 'BREAKEVEN' =
+      pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN';
+
+    if (user) {
+      await closeTradeEntry(trade.id, { exitPrice, pnl, result });
+    } else {
+      setTrades(closeLocalTrade(trade.id, { exitPrice, pnl, result }));
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#090B0E] text-[#E6EDF3] flex flex-col">
       {/* Top Bar Contract: 3 clean zones separated by gap-8 */}
@@ -635,6 +959,42 @@ function TerminalWorkspace() {
         <main className="flex-1 min-w-0 p-4 lg:p-6 max-w-[1440px]">
           {activeTab === 'dashboard' && (
             <DashboardView
+              config={config}
+              userEmail={user?.email || ''}
+              wallet={demoWallet}
+              trades={trades}
+              signals={signals}
+              livePricesBySymbol={livePricesBySymbol}
+              onOpenInTerminal={(id) => {
+                setSelectedInstrumentId(id);
+                setActiveTab('terminal');
+              }}
+              onQuickAddWalletFunds={async (amt) => {
+                if (user) {
+                  await addDemoWalletFunds(user.uid, demoWallet, amt, 'Dashboard Quick Top-Up');
+                } else {
+                  setDemoWallet(addLocalDemoFunds(amt, 'Dashboard Quick Top-Up'));
+                }
+              }}
+              onOpenBrokerModal={() => setBrokerModalOpen(true)}
+              onNavigateTab={(tab) => setActiveTab(tab)}
+              onQuickCloseTrade={handleQuickCloseTrade}
+              autoScanResults={autoScanResults}
+              autoScanLoading={autoScanLoading}
+              lastAutoScanAt={lastAutoScanAt}
+              autoScanEnabled={autoScanEnabled}
+              onToggleAutoScan={() => setAutoScanEnabled((v) => !v)}
+              autoExecuteEnabled={autoExecuteEnabled}
+              onToggleAutoExecute={() => setAutoExecuteEnabled((v) => !v)}
+              autoPilotNote={autoPilotNote}
+              onRunAutoScan={runAutoScanAndExecute}
+              onExecuteSignalInstant={handleExecuteSignalInstant}
+              executingInstrumentSymbol={executingInstrumentSymbol}
+            />
+          )}
+
+          {activeTab === 'terminal' && (
+            <TerminalView
               selectedInstrumentId={selectedInstrumentId}
               onSelectInstrument={setSelectedInstrumentId}
               timeframe={timeframe}
@@ -645,6 +1005,9 @@ function TerminalWorkspace() {
               liveStreaming={liveStreaming}
               onToggleLiveStreaming={() => setLiveStreaming((v) => !v)}
               config={config}
+              openTradesCount={trades.filter((t) => t.status === 'OPEN').length}
+              onOpenBrokerModal={() => setBrokerModalOpen(true)}
+              onNavigateDashboard={() => setActiveTab('dashboard')}
               signals={signals}
               liveSignal={liveSignal}
               analyzingLive={analyzingLive}
@@ -672,7 +1035,7 @@ function TerminalWorkspace() {
               activeInstrumentIds={config.activeInstruments}
               onSelectInstrument={(id) => {
                 setSelectedInstrumentId(id);
-                setActiveTab('dashboard');
+                setActiveTab('terminal');
               }}
             />
           )}
@@ -820,6 +1183,23 @@ function TerminalWorkspace() {
           walletBalance={demoWallet.balance}
           onClose={() => setOrderModalSignal(null)}
           onConfirmOrder={handleConfirmOrder}
+        />
+      )}
+
+      {brokerModalOpen && (
+        <BrokerConnectModal
+          currentBrokerLabel={config.brokerProviderLabel}
+          brokerReadiness={brokerReadiness}
+          onClose={() => setBrokerModalOpen(false)}
+          onSelectBroker={async (brokerProviderLabel) => {
+            const { userId: _u, updatedAt: _t, ...rest } = config;
+            const next = { ...rest, brokerProviderLabel: brokerProviderLabel.slice(0, 80) };
+            if (user) {
+              await saveStrategyConfig(user.uid, next);
+            } else {
+              setConfig(saveLocalConfig(next));
+            }
+          }}
         />
       )}
     </div>

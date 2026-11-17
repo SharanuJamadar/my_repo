@@ -21,14 +21,18 @@ interface RawMarketData {
 }
 
 interface CachedRaw {
-  expiresAt: number;
+  freshUntil: number;
+  staleUntil: number;
+  spotCheckedAt: number;
   data: RawMarketData;
 }
 
 const rawFeedCache = new Map<string, CachedRaw>();
 const inFlightRaw = new Map<string, Promise<RawMarketData | null>>();
-const CACHE_TTL_MS = 3500; // 3.5s fast live refresh cache
-const WATCHLIST_CACHE_TTL_MS = 20_000;
+const FRESH_CANDLES_MS = 12_000;
+const STALE_MAX_MS = 180_000;
+const WATCHLIST_FRESH_MS = 20_000;
+const SPOT_TICK_COOLDOWN_MS = 1_200;
 
 const BROWSER_HEADERS = {
   'User-Agent':
@@ -80,7 +84,7 @@ function aggregateTo4h(candles: CandleBar[]): CandleBar[] {
   return Array.from(buckets.values()).sort((a, b) => a.time - b.time);
 }
 
-async function fetchWithTimeout(url: string, timeoutMs = 7000): Promise<Response> {
+async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -97,7 +101,7 @@ async function fetchSwissquoteSpot(pair: string): Promise<number | null> {
   try {
     const res = await fetchWithTimeout(
       `https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/${pair}`,
-      3500
+      2200
     );
     if (!res.ok) return null;
     const json = (await res.json()) as any[];
@@ -109,6 +113,88 @@ async function fetchSwissquoteSpot(pair: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+async function fetchBinanceSpotPrice(symbol: string): Promise<number | null> {
+  const endpoints = [
+    'https://api.binance.com',
+    'https://data-api.binance.vision',
+    'https://api.binance.us',
+  ];
+  for (const base of endpoints) {
+    try {
+      const res = await fetchWithTimeout(
+        `${base}/api/v3/ticker/price?symbol=${symbol}`,
+        2000
+      );
+      if (!res.ok) continue;
+      const json = (await res.json()) as any;
+      const p = Number(json?.price);
+      if (Number.isFinite(p) && p > 0) return p;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function fetchYahooFastSpot(yahooSymbol: string): Promise<number | null> {
+  try {
+    const res = await fetchWithTimeout(
+      `https://query2.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
+        yahooSymbol
+      )}?interval=1m&range=1d&includePrePost=true`,
+      2500
+    );
+    if (!res.ok) return null;
+    const json = (await res.json()) as any;
+    const price = json?.chart?.result?.[0]?.meta?.regularMarketPrice;
+    return typeof price === 'number' && Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
+async function patchCachedSpotPrice(instrument: InstrumentMeta, entry: CachedRaw): Promise<void> {
+  let spotPrice: number | null = null;
+  if (instrument.binanceSymbol) {
+    spotPrice = await fetchBinanceSpotPrice(instrument.binanceSymbol);
+  } else if (instrument.swissquotePair) {
+    spotPrice = await fetchSwissquoteSpot(instrument.swissquotePair);
+  } else {
+    spotPrice = await fetchYahooFastSpot(instrument.yahooSymbol);
+  }
+
+  entry.spotCheckedAt = Date.now();
+  if (!spotPrice || spotPrice <= 0) return;
+
+  // Reject mismatched proxy spot values (>5% jump in 1s is different contract scale)
+  if (Math.abs(spotPrice - entry.data.price) / Math.max(entry.data.price, 1) > 0.05) {
+    return;
+  }
+
+  const nextCandles = entry.data.candles.map((c, idx, arr) => {
+    if (idx !== arr.length - 1) return c;
+    return {
+      ...c,
+      close: spotPrice!,
+      high: Math.max(c.high, spotPrice!),
+      low: Math.min(c.low, spotPrice!),
+    };
+  });
+
+  const change = spotPrice - entry.data.previousClose;
+  const changePercent = entry.data.previousClose ? (change / entry.data.previousClose) * 100 : 0;
+
+  entry.data = {
+    ...entry.data,
+    candles: nextCandles,
+    price: spotPrice,
+    high: Math.max(entry.data.high, spotPrice),
+    low: Math.min(entry.data.low, spotPrice),
+    change,
+    changePercent,
+  };
 }
 
 async function fetchBinanceCrypto(
@@ -153,7 +239,6 @@ async function fetchBinanceCrypto(
 
       if (candles.length < 10) continue;
       const price = Number(ticker.lastPrice) || candles[candles.length - 1].close;
-      // Update latest bar close to real-time ticker price
       candles[candles.length - 1].close = price;
       candles[candles.length - 1].high = Math.max(candles[candles.length - 1].high, price);
       candles[candles.length - 1].low = Math.min(candles[candles.length - 1].low, price);
@@ -256,7 +341,6 @@ async function fetchYahooMarket(
 ): Promise<RawMarketData | null> {
   const { interval, range } = mapTimeframeToYahoo(tf);
   const encoded = encodeURIComponent(yahooSymbol);
-  // query2 works reliably with browser headers; keep query1 as fallback
   const hosts = ['https://query2.finance.yahoo.com', 'https://query1.finance.yahoo.com'];
 
   for (const host of hosts) {
@@ -317,7 +401,6 @@ async function fetchYahooMarket(
       let price =
         typeof meta.regularMarketPrice === 'number' ? meta.regularMarketPrice : latest.close;
 
-      // For XAUUSD / XAGUSD spot feeds, blend live Swissquote sub-second BBO if available
       let providerLabel =
         segment === 'MCX'
           ? `Live Benchmark (${yahooSymbol})`
@@ -429,21 +512,12 @@ async function fetchTwelveData(
   }
 }
 
-async function getRawFeed(
+function triggerUpstreamRefresh(
+  feedKey: string,
   instrument: InstrumentMeta,
   timeframe: Timeframe,
-  ttlMs: number
+  freshWindowMs: number
 ): Promise<RawMarketData | null> {
-  // Share underlying feed key (e.g. GC=F, SI=F, CL=F) to prevent duplicate burst requests
-  const feedKey = `${
-    instrument.binanceSymbol || instrument.yahooSymbol
-  }:${timeframe}`;
-
-  const cached = rawFeedCache.get(feedKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.data;
-  }
-
   const existingFlight = inFlightRaw.get(feedKey);
   if (existingFlight) {
     return existingFlight;
@@ -470,7 +544,13 @@ async function getRawFeed(
     }
 
     if (raw) {
-      rawFeedCache.set(feedKey, { expiresAt: Date.now() + ttlMs, data: raw });
+      const now = Date.now();
+      rawFeedCache.set(feedKey, {
+        freshUntil: now + freshWindowMs,
+        staleUntil: now + STALE_MAX_MS,
+        spotCheckedAt: now,
+        data: raw,
+      });
     }
     return raw;
   })().finally(() => {
@@ -481,6 +561,50 @@ async function getRawFeed(
   return flight;
 }
 
+async function getRawFeed(
+  instrument: InstrumentMeta,
+  timeframe: Timeframe,
+  isWatchlist: boolean
+): Promise<RawMarketData | null> {
+  const feedKey = `${
+    instrument.binanceSymbol || instrument.yahooSymbol
+  }:${timeframe}`;
+  const now = Date.now();
+  const freshWindowMs = isWatchlist ? WATCHLIST_FRESH_MS : FRESH_CANDLES_MS;
+  const cached = rawFeedCache.get(feedKey);
+
+  // 1. Fresh cache hit: optionally apply 1.2s lightweight spot tick on active chart
+  if (cached && now < cached.freshUntil) {
+    if (!isWatchlist && now - cached.spotCheckedAt > SPOT_TICK_COOLDOWN_MS) {
+      await patchCachedSpotPrice(instrument, cached);
+    }
+    return cached.data;
+  }
+
+  // 2. Stale-While-Revalidate hit: return cached snapshot immediately (<1ms) & refresh candles async
+  if (cached && now < cached.staleUntil) {
+    if (!isWatchlist && now - cached.spotCheckedAt > SPOT_TICK_COOLDOWN_MS) {
+      await patchCachedSpotPrice(instrument, cached);
+    }
+    void triggerUpstreamRefresh(feedKey, instrument, timeframe, freshWindowMs);
+    return cached.data;
+  }
+
+  // 3. Cold miss or expired beyond STALE_MAX_MS: block for real upstream verification
+  return triggerUpstreamRefresh(feedKey, instrument, timeframe, freshWindowMs);
+}
+
+export async function prewarmPriorityFeeds(): Promise<void> {
+  const priorityIds = ['XAUUSD', 'NIFTY50', 'XAGUSD', 'BTCUSDT', 'MCX_CRUDEOIL'];
+  const targets = priorityIds.map((id) => getInstrumentById(id));
+  await Promise.allSettled(
+    targets.flatMap((inst) => [
+      getRawFeed(inst, '5m', true),
+      getRawFeed(inst, '15m', true),
+    ])
+  );
+}
+
 export async function fetchLiveMarketQuote(
   instrumentId: string,
   timeframe: Timeframe = '5m',
@@ -489,18 +613,14 @@ export async function fetchLiveMarketQuote(
 ): Promise<MarketQuoteResponse> {
   const instrument = getInstrumentById(instrumentId);
   const fetchedAt = new Date().toISOString();
-  const raw = await getRawFeed(
-    instrument,
-    timeframe,
-    isWatchlist ? WATCHLIST_CACHE_TTL_MS : CACHE_TTL_MS
-  );
+  const raw = await getRawFeed(instrument, timeframe, isWatchlist);
 
   if (!raw || raw.candles.length === 0) {
     return {
       instrument,
       available: false,
       statusText: 'DATA UNAVAILABLE',
-      unavailableReason: `Live upstream market feed for ${instrument.symbol} (${timeframe}) is temporarily unavailable. Use the Live Chart switch to view TradingView / Investing.com stream.`,
+      unavailableReason: `Live upstream market feed for ${instrument.symbol} (${timeframe}) is temporarily unavailable. Use the Stream Widget toggle to view TradingView / Investing.com stream.`,
       provider: 'No Active Feed',
       fetchedAt,
       marketTimestamp: fetchedAt,
