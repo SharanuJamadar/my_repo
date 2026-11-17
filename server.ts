@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 import {
   DEFAULT_STRATEGY_CONFIG,
   INSTRUMENTS,
+  type LiveMarketNewsResponse,
+  type MarketNewsCategory,
   type StrategyConfig,
   type Timeframe,
 } from './src/types/trading.ts';
@@ -22,6 +24,7 @@ import {
   analyzeUploadedChartWithGemini,
   chatWithTradingAssistant,
   enhanceLiveAnalysisWithGemini,
+  fetchLiveMarketNewsWithGemini,
 } from './server/geminiService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -90,7 +93,86 @@ function sanitizeConfig(raw: any): StrategyConfig {
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
-  res.json({ ok: true, service: 'SHARAN', timestamp: new Date().toISOString() });
+  res.json({ ok: true, service: 'My Trade', timestamp: new Date().toISOString() });
+});
+
+app.get('/.well-known/assetlinks.json', (req: Request, res: Response) => {
+  const pkg =
+    typeof req.query.packageName === 'string' && /^[a-zA-Z][a-zA-Z0-9_.]*$/.test(req.query.packageName)
+      ? req.query.packageName
+      : process.env.PLAYSTORE_PACKAGE_NAME || 'com.mytrade.terminal';
+  const sha =
+    typeof req.query.sha256 === 'string' && /^[A-Fa-f0-9:]{95}$/.test(req.query.sha256)
+      ? req.query.sha256.toUpperCase()
+      : process.env.PLAYSTORE_SHA256_FINGERPRINT ||
+        '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00';
+
+  res.type('application/json').json([
+    {
+      relation: ['delegate_permission/common.handle_all_urls'],
+      target: {
+        namespace: 'android_app',
+        package_name: pkg,
+        sha256_cert_fingerprints: [sha],
+      },
+    },
+  ]);
+});
+
+const liveNewsCache = new Map<string, { expiresAt: number; payload: LiveMarketNewsResponse }>();
+
+app.get('/api/news/live', async (req: Request, res: Response) => {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      res.status(503).json({
+        error: 'GEMINI_API_KEY is not configured in server environment secrets.',
+      });
+      return;
+    }
+
+    const rawCat = String(req.query.category || 'ALL').toUpperCase();
+    const category: MarketNewsCategory = ['ALL', 'INDIAN', 'MCX', 'INTERNATIONAL'].includes(rawCat)
+      ? (rawCat as MarketNewsCategory)
+      : 'ALL';
+    const query = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 120) : '';
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+
+    const cacheKey = `${category}:${query.toLowerCase()}`;
+    const existing = liveNewsCache.get(cacheKey);
+    if (!forceRefresh && existing && existing.expiresAt > Date.now()) {
+      res.json({ ...existing.payload, cached: true });
+      return;
+    }
+
+    const news = await fetchLiveMarketNewsWithGemini({ category, query });
+    liveNewsCache.set(cacheKey, {
+      expiresAt: Date.now() + 120_000, // 2-minute cache
+      payload: news,
+    });
+    res.json({ ...news, cached: false });
+  } catch (err: any) {
+    const rawMsg = err instanceof Error ? err.message : 'Failed to fetch live market news.';
+    let cleanMsg = rawMsg;
+    let statusCode = typeof err?.status === 'number' ? err.status : 500;
+    try {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed?.error?.message) {
+        cleanMsg = parsed.error.message;
+      }
+      if (typeof parsed?.error?.code === 'number') {
+        statusCode = parsed.error.code;
+      }
+    } catch {
+      // Keep original message if not JSON
+    }
+    if (statusCode === 429) {
+      cleanMsg =
+        'Gemini API quota limit reached for live Google Search news. Please verify or upgrade your API key quota in Settings > Secrets, then click Retry.';
+    }
+    res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
+      error: cleanMsg,
+    });
+  }
 });
 
 let cachedBotUsername: string | null = null;
@@ -739,7 +821,7 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
     res.json({
       status: 'CONFIRMED_PAPER',
       brokerOrderId: paperOrderId,
-      brokerName: String(brokerName || 'SHARAN Paper Trading Engine').slice(0, 80),
+      brokerName: String(brokerName || 'My Trade Paper Trading Engine').slice(0, 80),
       message: `Paper order ${paperOrderId} recorded for ${contract} (${side} ${quantity} qty, SL ${stopLoss}, Target ${targetPrice}${expiry ? `, Exp ${expiry}` : ''}).`,
     });
   } catch (err) {
@@ -769,10 +851,19 @@ async function startServer() {
           next();
           return;
         }
-        const safeCode = result.code.replace(
-          'transport.connect(createHMRHandler(handleMessage));',
-          '/* Vite HMR WebSocket disabled in AI Studio runtime */'
-        );
+        const safeCode = result.code
+          .replace(
+            'transport.connect(createHMRHandler(handleMessage));',
+            '/* Vite HMR WebSocket disabled in AI Studio runtime */'
+          )
+          .replace(
+            'else throw new SendBeforeConnectError("send was called before connect");',
+            'else return;'
+          )
+          .replace(
+            'else throw new SendBeforeConnectError("invoke was called before connect");',
+            'else return;'
+          );
         res.type('application/javascript').send(safeCode);
       } catch {
         next();
@@ -795,7 +886,7 @@ async function startServer() {
   attachBinanceWsHub(httpServer);
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`SHARAN server + /ws/market listening on http://0.0.0.0:${PORT}`);
+    console.log(`My Trade server + /ws/market listening on http://0.0.0.0:${PORT}`);
     void prewarmPriorityFeeds();
     const keepWarmTimer = setInterval(() => {
       void prewarmPriorityFeeds();

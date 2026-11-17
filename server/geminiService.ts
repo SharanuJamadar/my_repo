@@ -1,7 +1,11 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
   GeneratedSignalPayload,
+  GroundingSource,
   InstrumentMeta,
+  LiveMarketNewsResponse,
+  MarketNewsCategory,
+  MarketNewsItem,
   MarketQuoteResponse,
   StrategyConfig,
 } from '../src/types/trading.ts';
@@ -23,7 +27,7 @@ function getGeminiClient(): GoogleGenAI {
 }
 
 function buildStrategySystemRules(config: StrategyConfig): string {
-  return `You are the institutional quantitative analyst for SHARAN — AI TRADING TERMINAL.
+  return `You are the institutional quantitative analyst for My Trade — AI TRADING TERMINAL.
 You MUST strictly enforce this customized trading strategy in every analysis:
 
 1. MULTI-TIMEFRAME RULES:
@@ -288,7 +292,7 @@ ${historyText || '(New session)'}
 TRADER QUESTION:
 ${message}
 
-Respond directly, cleanly, and concisely as the SHARAN analyst. If generating a trade signal, use the exact SHARAN format (or explicitly state NO TRADE if rules are not satisfied).`;
+Respond directly, cleanly, and concisely as the My Trade analyst. If generating a trade signal, use the exact My Trade format (or explicitly state NO TRADE if rules are not satisfied).`;
 
   const parts: any[] = [];
   if (imageBase64) {
@@ -308,8 +312,154 @@ Respond directly, cleanly, and concisely as the SHARAN analyst. If generating a 
     config: {
       systemInstruction: buildStrategySystemRules(config),
       thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
+      tools: [{ googleSearch: {} }],
     },
   });
 
-  return (response.text ?? 'Unable to generate analysis response.').trim();
+  const baseText = (response.text ?? 'Unable to generate analysis response.').trim();
+  const groundingSources = extractGroundingSources(response);
+  if (groundingSources.length === 0) {
+    return baseText;
+  }
+
+  const sourcesFooter = groundingSources
+    .slice(0, 4)
+    .map((s) => `- ${s.title}: ${s.uri}`)
+    .join('\n');
+  return `${baseText}\n\nWeb Sources (Google Search):\n${sourcesFooter}`;
+}
+
+function extractGroundingSources(response: any): GroundingSource[] {
+  const chunks = response?.candidates?.[0]?.groundingMetadata?.groundingChunks;
+  if (!Array.isArray(chunks)) return [];
+  const seen = new Set<string>();
+  const sources: GroundingSource[] = [];
+  for (const chunk of chunks) {
+    const uri = typeof chunk?.web?.uri === 'string' ? chunk.web.uri.trim() : '';
+    const title = typeof chunk?.web?.title === 'string' ? chunk.web.title.trim() : '';
+    if (!uri || !/^https?:\/\//i.test(uri) || seen.has(uri)) continue;
+    seen.add(uri);
+    sources.push({
+      title: title || new URL(uri).hostname.replace(/^www\./, ''),
+      uri,
+    });
+  }
+  return sources;
+}
+
+function extractJsonObject(raw: string): any | null {
+  const trimmed = raw.trim();
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const candidate = fencedMatch ? fencedMatch[1].trim() : trimmed;
+  const firstBrace = candidate.indexOf('{');
+  const lastBrace = candidate.lastIndexOf('}');
+  if (firstBrace === -1 || lastBrace <= firstBrace) return null;
+  try {
+    return JSON.parse(candidate.slice(firstBrace, lastBrace + 1));
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchLiveMarketNewsWithGemini(params: {
+  category: MarketNewsCategory;
+  query?: string;
+}): Promise<LiveMarketNewsResponse> {
+  const ai = getGeminiClient();
+  const category = params.category || 'ALL';
+  const customQuery = (params.query || '').trim().slice(0, 120);
+  const nowIso = new Date().toISOString();
+
+  const scopeDescription: Record<MarketNewsCategory, string> = {
+    ALL: 'Indian equities & indices (NIFTY 50, BANK NIFTY, SENSEX, RBI, FII/DII), commodities (Gold XAUUSD, Silver XAGUSD, WTI/MCX Crude Oil), and major international/crypto macro drivers (US Fed, DXY, Treasury yields, NASDAQ, Bitcoin BTCUSDT)',
+    INDIAN:
+      'Indian stock markets right now: NIFTY 50, BANK NIFTY, SENSEX, RBI policy, India VIX, FII/DII institutional flows, INR/USD, and top Nifty heavyweights',
+    MCX: 'Precious metals and energy commodities right now: Spot Gold (XAUUSD), Spot Silver (XAGUSD), MCX Gold/Silver, WTI Crude Oil, Brent Crude, OPEC+, US Dollar index impacting metals',
+    INTERNATIONAL:
+      'Global macro, US markets, forex, and crypto right now: Federal Reserve rates, US inflation/jobs data, NASDAQ/S&P 500, EURUSD, USDJPY, Bitcoin (BTCUSDT), Ethereum (ETHUSDT)',
+  };
+
+  const prompt = `Search the live web using Google Search right now (${nowIso}) for the latest breaking financial news and macro events currently moving markets.
+Focus scope: ${scopeDescription[category]}${customQuery ? `\nAdditional trader topic filter: "${customQuery}"` : ''}.
+
+Return 6 to 8 high-signal, verified current news updates that are genuinely affecting price action today or in the active trading session.
+Respond ONLY with valid JSON (no commentary before or after) matching this exact shape:
+{
+  "marketBrief": "2 crisp sentences summarizing today's dominant market narrative and risk sentiment.",
+  "items": [
+    {
+      "headline": "Clear factual news headline",
+      "summary": "1 to 2 sentences explaining the direct market impact on price action or yields.",
+      "impactDirection": "BULLISH" | "BEARISH" | "VOLATILE" | "NEUTRAL",
+      "impactLevel": "HIGH" | "MEDIUM" | "LOW",
+      "marketScope": "INDIAN" | "MCX" | "INTERNATIONAL",
+      "affectedAssets": ["NIFTY50", "XAUUSD", "CRUDEOIL", "BTCUSDT"],
+      "publishedTime": "Relative time or date from the news report, e.g. '2h ago' or 'Today'",
+      "sourceName": "Publisher name, e.g. Reuters, Bloomberg, Mint, CNBC",
+      "sourceUrl": "Direct https article URL if known"
+    }
+  ]
+}
+Use standard ticker labels in affectedAssets where relevant (NIFTY50, BANKNIFTY, SENSEX, XAUUSD, XAGUSD, CRUDEOIL, BTCUSDT, ETHUSDT, EURUSD, USDJPY, US100, US500).`;
+
+  const response = await ai.models.generateContent({
+    model: 'gemini-4-hydrogen',
+    contents: prompt,
+    config: {
+      thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
+      tools: [{ googleSearch: {} }],
+    },
+  });
+
+  const groundingSources = extractGroundingSources(response);
+  const rawText = (response.text ?? '').trim();
+  const parsed = extractJsonObject(rawText);
+
+  const validDirections = new Set(['BULLISH', 'BEARISH', 'VOLATILE', 'NEUTRAL']);
+  const validLevels = new Set(['HIGH', 'MEDIUM', 'LOW']);
+  const validScopes = new Set(['INDIAN', 'MCX', 'INTERNATIONAL']);
+
+  let items: MarketNewsItem[] = [];
+  if (parsed && Array.isArray(parsed.items)) {
+    items = parsed.items
+      .filter((row: any) => row && typeof row.headline === 'string' && row.headline.trim().length > 0)
+      .slice(0, 8)
+      .map((row: any, idx: number): MarketNewsItem => {
+        const dir = String(row.impactDirection || 'NEUTRAL').toUpperCase();
+        const lvl = String(row.impactLevel || 'MEDIUM').toUpperCase();
+        const scp = String(row.marketScope || (category === 'ALL' ? 'INTERNATIONAL' : category)).toUpperCase();
+        const rawUrl = typeof row.sourceUrl === 'string' ? row.sourceUrl.trim() : '';
+        const safeUrl = /^https?:\/\//i.test(rawUrl)
+          ? rawUrl
+          : groundingSources[idx]?.uri;
+
+        return {
+          headline: String(row.headline).trim(),
+          summary: String(row.summary || '').trim(),
+          impactDirection: (validDirections.has(dir) ? dir : 'NEUTRAL') as MarketNewsItem['impactDirection'],
+          impactLevel: (validLevels.has(lvl) ? lvl : 'MEDIUM') as MarketNewsItem['impactLevel'],
+          marketScope: (validScopes.has(scp) ? scp : 'INTERNATIONAL') as MarketNewsItem['marketScope'],
+          affectedAssets: Array.isArray(row.affectedAssets)
+            ? row.affectedAssets.map((a: unknown) => String(a).toUpperCase().trim()).filter(Boolean).slice(0, 5)
+            : [],
+          publishedTime: String(row.publishedTime || 'Latest').trim(),
+          sourceName: String(row.sourceName || groundingSources[idx]?.title || 'Market Wire').trim(),
+          sourceUrl: safeUrl,
+        };
+      });
+  }
+
+  const marketBrief =
+    typeof parsed?.marketBrief === 'string' && parsed.marketBrief.trim()
+      ? parsed.marketBrief.trim()
+      : rawText.slice(0, 420) || 'Live market briefing retrieved via Google Search grounding.';
+
+  return {
+    category,
+    query: customQuery,
+    fetchedAt: nowIso,
+    marketBrief,
+    items,
+    groundingSources,
+  };
 }

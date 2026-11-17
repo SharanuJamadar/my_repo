@@ -108,7 +108,7 @@ export const AdminSettingsView: React.FC<AdminSettingsViewProps> = ({
         <div>
           <h2 className="text-xl font-semibold text-white">Admin & Strategy Engine Settings</h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Configure SHARAN strategy parameters, risk gates, instruments, and optional integrations without editing code
+            Configure My Trade strategy parameters, risk gates, instruments, and optional integrations without editing code
           </p>
         </div>
 

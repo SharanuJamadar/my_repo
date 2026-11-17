@@ -34,7 +34,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
           <div className="max-w-lg w-full bg-[#11141A] border border-red-500/30 rounded-xl p-6 space-y-4">
             <div className="flex items-center gap-3 text-red-400">
               <AlertTriangle className="w-5 h-5 shrink-0" />
-              <h2 className="text-lg font-semibold">SHARAN — Session Recovery</h2>
+              <h2 className="text-lg font-semibold">My Trade — Session Recovery</h2>
             </div>
             <p className="text-sm text-slate-300 leading-relaxed">
               {parsedDetail?.error

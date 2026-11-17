@@ -1,6 +1,16 @@
 import React, { useMemo } from 'react';
 import { ArrowRight, TrendingUp } from 'lucide-react';
 import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import {
   INSTRUMENTS,
   type DemoWalletState,
   type GeneratedSignalPayload,
@@ -8,6 +18,7 @@ import {
 } from '../types/trading';
 import { WalletDepositWithdrawSection } from './WalletDepositWithdrawSection';
 import { DashboardWatchlistSection } from './DashboardWatchlistSection';
+import { LiveMarketNewsSection } from './LiveMarketNewsSection';
 
 export interface AutoScanMarketItem {
   instrument: (typeof INSTRUMENTS)[number];
@@ -39,6 +50,16 @@ interface DashboardViewProps {
   onNavigateJournal: () => void;
 }
 
+interface DailyPnlPoint {
+  dateKey: string;
+  label: string;
+  dailyPnl: number;
+  realizedPnl: number;
+  openMtmPnl: number;
+  cumulativePnl: number;
+  closedCount: number;
+}
+
 function normalizeKey(v: string): string {
   return v.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
@@ -59,6 +80,50 @@ function fmt(val: number, decimals = 2): string {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+function parseTimestamp(ts: unknown): Date | null {
+  if (!ts) return null;
+  if (ts instanceof Date) {
+    return Number.isNaN(ts.getTime()) ? null : ts;
+  }
+  if (typeof ts === 'object') {
+    const obj = ts as { toDate?: () => Date; seconds?: number };
+    if (typeof obj.toDate === 'function') {
+      const d = obj.toDate();
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+    if (typeof obj.seconds === 'number') {
+      const d = new Date(obj.seconds * 1000);
+      return Number.isNaN(d.getTime()) ? null : d;
+    }
+  }
+  if (typeof ts === 'number' || typeof ts === 'string') {
+    const d = new Date(ts);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function toLocalDateKey(d: Date): string {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatAxisLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function formatCompactAxis(val: number): string {
+  const abs = Math.abs(val);
+  const sign = val < 0 ? '-' : '';
+  if (abs >= 1_000_000) return `${sign}${(abs / 1_000_000).toFixed(1)}M`;
+  if (abs >= 1_000) return `${sign}${(abs / 1_000).toFixed(1)}k`;
+  return `${sign}${Math.round(abs)}`;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -113,9 +178,86 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [trades, livePricesBySymbol, wallet.balance]);
 
+  const dailyPnlSeries = useMemo<DailyPnlPoint[]>(() => {
+    if (trades.length === 0) return [];
+
+    const byDay = new Map<string, { realized: number; closedCount: number }>();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const todayKey = toLocalDateKey(today);
+
+    let earliestDay = new Date(today);
+    earliestDay.setDate(earliestDay.getDate() - 6);
+
+    for (const t of trades) {
+      const refDate =
+        t.status === 'CLOSED'
+          ? parseTimestamp(t.updatedAt) ?? parseTimestamp(t.createdAt)
+          : parseTimestamp(t.createdAt);
+      if (!refDate) continue;
+
+      const dayStart = new Date(refDate);
+      dayStart.setHours(0, 0, 0, 0);
+      if (dayStart < earliestDay) {
+        earliestDay = dayStart;
+      }
+
+      if (t.status === 'CLOSED') {
+        const key = toLocalDateKey(dayStart);
+        const cur = byDay.get(key) ?? { realized: 0, closedCount: 0 };
+        cur.realized += Number(t.pnl) || 0;
+        cur.closedCount += 1;
+        byDay.set(key, cur);
+      }
+    }
+
+    // Cap lookback window to 30 days for readability
+    const minWindowStart = new Date(today);
+    minWindowStart.setDate(minWindowStart.getDate() - 29);
+    if (earliestDay < minWindowStart) {
+      earliestDay = minWindowStart;
+    }
+
+    const points: DailyPnlPoint[] = [];
+    let runningCumulative = 0;
+
+    // Seed cumulative sum for any closed trades prior to window start
+    for (const [key, entry] of byDay.entries()) {
+      if (key < toLocalDateKey(earliestDay)) {
+        runningCumulative += entry.realized;
+      }
+    }
+
+    const cursor = new Date(earliestDay);
+    while (cursor <= today) {
+      const key = toLocalDateKey(cursor);
+      const rec = byDay.get(key);
+      const realized = rec ? Number(rec.realized.toFixed(2)) : 0;
+      const openMtm = key === todayKey ? Number(pnlSnapshot.liveOpenPnl.toFixed(2)) : 0;
+      const daily = Number((realized + openMtm).toFixed(2));
+      runningCumulative = Number((runningCumulative + daily).toFixed(2));
+
+      points.push({
+        dateKey: key,
+        label: formatAxisLabel(key),
+        dailyPnl: daily,
+        realizedPnl: realized,
+        openMtmPnl: openMtm,
+        cumulativePnl: runningCumulative,
+        closedCount: rec?.closedCount ?? 0,
+      });
+
+      cursor.setDate(cursor.getDate() + 1);
+    }
+
+    return points;
+  }, [trades, pnlSnapshot.liveOpenPnl]);
+
+  const lineStrokeColor = pnlSnapshot.netCombinedPnl >= 0 ? '#10B981' : '#EF4444';
+
   return (
     <div className="space-y-8">
-      {/* 1. Portfolio P&L Overview (No live trades table) */}
+      {/* 1. Portfolio P&L Overview (Summary KPIs + Daily P&L History Line Chart) */}
       <section className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
         <div className="px-6 py-5 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -206,6 +348,109 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div className="text-[11px] text-slate-500 mt-1">Closed + Live MTM</div>
           </div>
         </div>
+
+        {/* Daily P&L History Chart */}
+        <div className="px-6 py-5 border-t border-white/[0.06]">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+            <div>
+              <h2 className="text-xs font-semibold text-slate-200">Daily P&amp;L History</h2>
+              <p className="text-[11px] text-slate-500 mt-0.5">
+                Day-by-day net P&amp;L across closed trades and today&apos;s live open MTM
+              </p>
+            </div>
+            {dailyPnlSeries.length > 0 && (
+              <span className="text-[11px] text-slate-400 font-mono-tabular">
+                {dailyPnlSeries[0].label} – {dailyPnlSeries[dailyPnlSeries.length - 1].label}
+              </span>
+            )}
+          </div>
+
+          {dailyPnlSeries.length === 0 ? (
+            <div className="h-[190px] flex flex-col items-center justify-center text-center border border-dashed border-white/[0.07] rounded-lg px-4">
+              <p className="text-xs font-medium text-slate-300">No daily P&amp;L history yet</p>
+              <p className="text-[11px] text-slate-500 mt-1 max-w-sm">
+                Once trades are logged or executed in this account, your daily performance curve will render here.
+              </p>
+            </div>
+          ) : (
+            <div className="h-[200px] w-full">
+              <ResponsiveContainer width="100%" height={200} minWidth={0}>
+                <LineChart
+                  data={dailyPnlSeries}
+                  margin={{ top: 8, right: 12, left: 0, bottom: 0 }}
+                >
+                  <CartesianGrid stroke="rgba(255,255,255,0.05)" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{
+                      fill: '#64748B',
+                      fontSize: 11,
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}
+                    axisLine={false}
+                    tickLine={false}
+                    minTickGap={24}
+                  />
+                  <YAxis
+                    tickFormatter={formatCompactAxis}
+                    tick={{
+                      fill: '#64748B',
+                      fontSize: 11,
+                      fontFamily: "'JetBrains Mono', monospace",
+                    }}
+                    axisLine={false}
+                    tickLine={false}
+                    width={56}
+                  />
+                  <ReferenceLine
+                    y={0}
+                    stroke="rgba(148,163,184,0.28)"
+                    strokeDasharray="3 3"
+                  />
+                  <Tooltip
+                    cursor={{ stroke: 'rgba(148,163,184,0.22)', strokeWidth: 1 }}
+                    content={({ active, payload }) => {
+                      if (!active || !payload?.length) return null;
+                      const pt = payload[0]?.payload as DailyPnlPoint | undefined;
+                      if (!pt) return null;
+                      return (
+                        <div className="bg-[#0C0F14] border border-white/[0.1] rounded-lg px-3 py-2 text-xs shadow-xl space-y-1">
+                          <div className="text-[11px] text-slate-400 font-medium">{pt.label}</div>
+                          <div
+                            className={`font-mono-tabular font-semibold ${
+                              pt.dailyPnl >= 0 ? 'text-emerald-400' : 'text-red-400'
+                            }`}
+                          >
+                            Daily: {pt.dailyPnl >= 0 ? '+' : ''}
+                            {fmt(pt.dailyPnl, 2)}
+                          </div>
+                          <div className="text-[11px] text-slate-400 font-mono-tabular">
+                            Cumulative: {pt.cumulativePnl >= 0 ? '+' : ''}
+                            {fmt(pt.cumulativePnl, 2)}
+                          </div>
+                          <div className="text-[11px] text-slate-500 font-mono-tabular">
+                            {pt.closedCount} closed
+                            {pt.openMtmPnl !== 0
+                              ? ` · Open MTM ${pt.openMtmPnl >= 0 ? '+' : ''}${fmt(pt.openMtmPnl, 2)}`
+                              : ''}
+                          </div>
+                        </div>
+                      );
+                    }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="dailyPnl"
+                    stroke={lineStrokeColor}
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: '#11141A', stroke: lineStrokeColor, strokeWidth: 2 }}
+                    activeDot={{ r: 5, fill: lineStrokeColor, stroke: '#11141A', strokeWidth: 2 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* 2. Wallet: Deposit & Withdrawal Section */}
@@ -220,6 +465,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* 3. Custom Watchlist (Add chosen scripts only) */}
       <DashboardWatchlistSection onOpenInTerminal={onOpenInTerminal} />
+
+      {/* 4. Live Market News (Google Search Grounded) */}
+      <LiveMarketNewsSection onOpenInTerminal={onOpenInTerminal} />
     </div>
   );
 };
+

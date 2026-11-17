@@ -266,7 +266,7 @@ export function formatSignalBlock(payload: {
 }): { formattedSignalText: string; telegramReadyText: string } {
   if (payload.direction === 'NO_TRADE' || payload.status === 'NO_TRADE') {
     const noTradeText = [
-      'SHARAN',
+      'My Trade',
       '',
       `Instrument: ${payload.instrument}`,
       `Contract: ${payload.contract}`,
@@ -283,7 +283,7 @@ export function formatSignalBlock(payload: {
   const actionLabel = payload.direction === 'BUY' ? 'BUY ABOVE' : 'SELL BELOW';
   const c = payload.currency;
   const lines = [
-    'SHARAN',
+    'My Trade',
     '',
     `Instrument: ${payload.instrument}`,
     `Contract: ${payload.contract}`,
@@ -611,7 +611,7 @@ export function evaluateMultiTimeframeStrategy(params: {
 
   const confirmationText =
     finalDirection === 'NO_TRADE'
-      ? `Conditions do not satisfy SHARAN rules (Score ${score}/100, min ${config.minSetupScore}). ${reasonsAgainst[0] ?? 'Wait for clean 15m + 5m alignment.'}`
+      ? `Conditions do not satisfy My Trade rules (Score ${score}/100, min ${config.minSetupScore}). ${reasonsAgainst[0] ?? 'Wait for clean 15m + 5m alignment.'}`
       : `${config.trendTimeframe} ${tTech.trendBias.toLowerCase()} trend + ${config.entryTimeframe} ${eTech.candlePattern.toLowerCase()} + EMA ${config.emaFast}/${config.emaMid} alignment${isCrude ? ' (EMA 9 Crude priority)' : ''}.`;
 
   const formatted = formatSignalBlock({

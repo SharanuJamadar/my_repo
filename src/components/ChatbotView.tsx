@@ -99,7 +99,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-white">SHARAN — AI Trading Assistant</h2>
+          <h2 className="text-xl font-semibold text-white">My Trade — AI Trading Assistant</h2>
           <p className="text-xs text-slate-400 mt-0.5">
             Enforces {config.trendTimeframe} Trend + {config.entryTimeframe} Entry · EMA {config.emaFast}/{config.emaMid}/{config.emaSlow} · Min Score {config.minSetupScore}/100
           </p>

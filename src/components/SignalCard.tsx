@@ -55,7 +55,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({
       <div className="px-5 py-4 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-xs text-slate-400">
-            SHARAN · {signal.entryTimeframe} Entry / {signal.trendTimeframe} Trend
+            My Trade · {signal.entryTimeframe} Entry / {signal.trendTimeframe} Trend
           </div>
           <div className="mt-1 flex items-center gap-2.5">
             {isBuy && <TrendingUp className="w-5 h-5 text-emerald-400" />}
@@ -89,7 +89,7 @@ export const SignalCard: React.FC<SignalCardProps> = ({
       </div>
 
       <div className="p-5 grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left: Exact SHARAN Signal Output */}
+        {/* Left: Exact My Trade Signal Output */}
         <div className="lg:col-span-5 space-y-4">
           <div className="bg-[#090B0E] border border-white/[0.08] rounded-lg p-4">
             <pre className="font-mono-tabular text-xs leading-relaxed text-slate-200 whitespace-pre-wrap break-words">

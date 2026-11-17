@@ -99,7 +99,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
       await onDispatchTelegramText({
         instrument: marketUpdateInstrument,
         eventType: 'MARKET_UPDATE',
-        messageText: `SHARAN — MARKET UPDATE\nInstrument: ${marketUpdateInstrument}\n\n${marketUpdateText.trim()}\n\nTRADE SMART • STAY DISCIPLINED • FOLLOW THE CALL.`,
+        messageText: `My Trade — MARKET UPDATE\nInstrument: ${marketUpdateInstrument}\n\n${marketUpdateText.trim()}\n\nTRADE SMART • STAY DISCIPLINED • FOLLOW THE CALL.`,
       });
       setMarketUpdateText('');
     } finally {
@@ -286,7 +286,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                               signalId: sig.id,
                               instrument: sig.instrument,
                               eventType: 'SIGNAL',
-                              messageText: `SHARAN\n\nInstrument: ${sig.instrument}\nContract: ${sig.contract}\nDirection: ${sig.direction}\nEntry: ${sig.entryPrice}\nT1: ${sig.target1} | T2: ${sig.target2}\nSL: ${sig.stopLoss}\nSTATUS: ${sig.status}\n\nTRADE SMART • STAY DISCIPLINED • FOLLOW THE CALL.`,
+                              messageText: `My Trade\n\nInstrument: ${sig.instrument}\nContract: ${sig.contract}\nDirection: ${sig.direction}\nEntry: ${sig.entryPrice}\nT1: ${sig.target1} | T2: ${sig.target2}\nSL: ${sig.stopLoss}\nSTATUS: ${sig.status}\n\nTRADE SMART • STAY DISCIPLINED • FOLLOW THE CALL.`,
                             })
                           }
                           className="px-2.5 py-1 text-[11px] bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/30 text-sky-300 rounded-md whitespace-nowrap"
@@ -302,7 +302,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                                   signalId: sig.id,
                                   instrument: sig.instrument,
                                   eventType: 'TARGET_HIT',
-                                  messageText: `SHARAN — TARGET ACHIEVED\n${sig.instrument} (${sig.contract})\nTarget ${sig.target1} achieved from entry ${sig.entryPrice}.`,
+                                  messageText: `My Trade — TARGET ACHIEVED\n${sig.instrument} (${sig.contract})\nTarget ${sig.target1} achieved from entry ${sig.entryPrice}.`,
                                 });
                               }}
                               className="px-2.5 py-1 text-[11px] bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-md whitespace-nowrap"
@@ -316,7 +316,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                                   signalId: sig.id,
                                   instrument: sig.instrument,
                                   eventType: 'SL_HIT',
-                                  messageText: `SHARAN — STOP LOSS HIT\n${sig.instrument} (${sig.contract})\nStop-loss ${sig.stopLoss} triggered. Capital preserved.`,
+                                  messageText: `My Trade — STOP LOSS HIT\n${sig.instrument} (${sig.contract})\nStop-loss ${sig.stopLoss} triggered. Capital preserved.`,
                                 });
                               }}
                               className="px-2.5 py-1 text-[11px] bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 rounded-md whitespace-nowrap"

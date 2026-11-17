@@ -73,7 +73,9 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
 
   // Demo Account registration state (do NOT pre-show any wallet)
   const [fullName, setFullName] = useState(
-    initialProfile.displayName && initialProfile.displayName !== 'Sharan Trader'
+    initialProfile.displayName &&
+      initialProfile.displayName !== 'Sharan Trader' &&
+      initialProfile.displayName !== 'My Trade Trader'
       ? initialProfile.displayName
       : userDisplayName || ''
   );
@@ -112,7 +114,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
 
       await onConnectBrokerAccount({
         brokerProviderLabel: label,
-        displayName: (fullName.trim() || userDisplayName || 'Sharan Trader').slice(0, 100),
+        displayName: (fullName.trim() || userDisplayName || 'My Trade Trader').slice(0, 100),
         email: (email.trim() || userEmail || '').slice(0, 200),
         mobileNumber: mobileNumber.trim().slice(0, 24),
       });
@@ -177,7 +179,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
           onClick={onBackToLanding}
           className="font-classic-serif text-xl font-semibold tracking-tight text-white whitespace-nowrap shrink-0"
         >
-          SHARAN
+          My Trade
         </button>
 
         <div className="hidden sm:flex items-center gap-4 text-xs text-slate-400">
@@ -215,7 +217,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
           <div className="space-y-2 text-center max-w-2xl mx-auto">
             <div className="text-xs font-medium text-[#C9A24D]">Account Access Setup</div>
             <h1 className="font-classic-serif text-3xl sm:text-4xl font-semibold text-white tracking-tight text-balance">
-              Choose how you would like to trade with SHARAN
+              Choose how you would like to trade with My Trade
             </h1>
             <p className="text-sm text-slate-400">
               Connect an existing brokerage app or create a personal Demo Account before entering
@@ -245,7 +247,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                 <h2 className="text-lg font-semibold text-white">Connect Trading App</h2>
                 <p className="text-xs text-slate-400 leading-relaxed">
                   Link Groww, Exness, Upstox, Zerodha Kite, Dhan, Angel One, or Binance to route
-                  supported instruments directly from your SHARAN workspace.
+                  supported instruments directly from your My Trade workspace.
                 </p>
               </div>
               <div className="flex items-center justify-between text-xs font-semibold text-white pt-3 border-t border-white/[0.06]">
@@ -421,7 +423,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                       maxLength={100}
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
-                      placeholder="e.g. Sharan Kumar"
+                      placeholder="e.g. Aarav Mehta"
                       className="w-full bg-[#090B0E] border border-white/[0.1] rounded-lg pl-9 pr-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#C9A24D]"
                     />
                   </div>

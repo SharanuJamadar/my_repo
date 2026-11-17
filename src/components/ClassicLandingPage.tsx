@@ -203,7 +203,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
           href="#top"
           className="font-classic-serif text-xl font-semibold tracking-tight text-white whitespace-nowrap shrink-0"
         >
-          SHARAN
+          My Trade
         </a>
 
         <nav className="hidden md:flex items-center gap-7 text-xs font-medium text-slate-400">
@@ -312,7 +312,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
                 </h1>
 
                 <p className="text-[15px] sm:text-base text-slate-300 leading-relaxed max-w-xl">
-                  SHARAN combines institutional 15-minute trend confirmation with 5-minute entry
+                  My Trade combines institutional 15-minute trend confirmation with 5-minute entry
                   triggers, 30ms global price streams, custom Pine Script backtesting, and unified
                   broker routing in one focused trading terminal.
                 </p>
@@ -416,7 +416,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
               {!heroImgFailed ? (
                 <img
                   src={HERO_DESK_IMG}
-                  alt="SHARAN Institutional Multi-Asset Trading Desk"
+                  alt="My Trade Institutional Multi-Asset Trading Desk"
                   referrerPolicy="no-referrer"
                   onError={() => setHeroImgFailed(true)}
                   className="w-full h-full object-cover object-center lg:h-full"
@@ -598,7 +598,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
             Built for traders who refuse unverified signals.
           </h2>
           <p className="text-sm sm:text-base text-slate-400 mt-3 leading-relaxed">
-            Every trade plan generated inside SHARAN enforces structural support/resistance levels,
+            Every trade plan generated inside My Trade enforces structural support/resistance levels,
             validated risk-to-reward ratios, and real exchange market feeds.
           </p>
         </motion.div>
@@ -857,7 +857,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
       <footer className="mt-auto border-t border-white/[0.08] bg-[#090B0E] px-6 lg:px-10 py-8">
         <div className="max-w-[1280px] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs text-slate-500">
           <div className="flex items-center gap-4">
-            <span className="font-classic-serif text-sm font-semibold text-white">SHARAN</span>
+            <span className="font-classic-serif text-sm font-semibold text-white">My Trade</span>
             <span>Multi-Asset Trading &amp; Quantitative Research Terminal</span>
           </div>
           <div>

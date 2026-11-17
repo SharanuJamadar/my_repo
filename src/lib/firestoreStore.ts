@@ -306,7 +306,7 @@ export async function createTradeEntry(
       result: entry.result,
       pnl: Number(entry.pnl),
       riskReward: clampString(entry.riskReward, 20),
-      strategyConfirmation: clampString(entry.strategyConfirmation, 500) || 'SHARAN setup',
+      strategyConfirmation: clampString(entry.strategyConfirmation, 500) || 'My Trade setup',
       ...(entry.screenshotNote ? { screenshotNote: clampString(entry.screenshotNote, 300) } : {}),
       ...(entry.brokerOrderId ? { brokerOrderId: clampString(entry.brokerOrderId, 80) } : {}),
       createdAt: serverTimestamp(),
@@ -627,7 +627,7 @@ export async function saveAccountSettings(
   try {
     await setDoc(ref, {
       userId,
-      displayName: clampString(settings.displayName, 100) || 'Sharan Trader',
+      displayName: clampString(settings.displayName, 100) || 'My Trade Trader',
       email: clampString(settings.email || '', 200),
       mobileNumber: clampString(settings.mobileNumber || '', 24),
       accountMode: settings.accountMode || 'UNDECIDED',

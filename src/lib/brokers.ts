@@ -10,7 +10,7 @@ export interface BrokerAppMeta {
 export const BROKER_APPS: BrokerAppMeta[] = [
   {
     id: 'PAPER_ENGINE',
-    name: 'SHARAN Paper Engine',
+    name: 'My Trade Paper Engine',
     markets: 'All 14 Markets (Indian, MCX, Global, Crypto)',
     authProtocol: 'Built-in Instant Demo Execution',
     portalUrl: '',

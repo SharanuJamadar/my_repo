@@ -15,7 +15,7 @@ export interface PineTemplatePreset {
 export const PINE_STRATEGY_TEMPLATES: PineTemplatePreset[] = [
   {
     id: 'sharan-ema-vwap-rsi',
-    name: 'SHARAN EMA 9/20 Crossover + VWAP + RSI',
+    name: 'My Trade EMA 9/20 Crossover + VWAP + RSI',
     description:
       'Flagship intraday momentum strategy: EMA 9 crosses EMA 20 above/below VWAP with RSI filter.',
     instrumentId: 'XAUUSD',
@@ -24,7 +24,7 @@ export const PINE_STRATEGY_TEMPLATES: PineTemplatePreset[] = [
     stopLossPct: 0.45,
     takeProfitPct: 0.9,
     pineCode: `//@version=5
-strategy("SHARAN EMA 9/20 + VWAP + RSI", overlay=true)
+strategy("My Trade EMA 9/20 + VWAP + RSI", overlay=true)
 
 fastLen = input.int(9, "Fast EMA")
 midLen = input.int(20, "Mid EMA")

@@ -48,7 +48,7 @@ export const OrderExecutionModal: React.FC<OrderExecutionModalProps> = ({
         expiry,
         brokerName:
           executionMode === 'PAPER'
-            ? 'SHARAN Paper Trading Engine'
+            ? 'My Trade Paper Trading Engine'
             : config.brokerProviderLabel || 'Authorized Broker Adapter',
       });
       onClose();

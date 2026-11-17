@@ -789,9 +789,9 @@ export const DEFAULT_STRATEGY_CONFIG: Omit<StrategyConfig, 'userId'> = {
   comexCrudeEma9Priority: true,
   paperTradingOnly: true,
   autoBroadcastTelegram: false,
-  telegramChannelLabel: 'SHARAN Trading Desk',
+  telegramChannelLabel: 'My Trade Desk',
   dataProviderLabel: 'Live Multi-Source Feed (Yahoo query2 / Binance / Swissquote)',
-  brokerProviderLabel: 'SHARAN Paper Trading Engine',
+  brokerProviderLabel: 'My Trade Paper Trading Engine',
   killSwitchActive: false,
   activeInstruments: INSTRUMENTS.map((i) => i.id),
 };
@@ -811,7 +811,7 @@ export interface AccountProfileSettings {
 }
 
 export const DEFAULT_ACCOUNT_PROFILE: AccountProfileSettings = {
-  displayName: 'Sharan Trader',
+  displayName: 'My Trade Trader',
   email: '',
   mobileNumber: '',
   accountMode: 'UNDECIDED',
@@ -933,3 +933,31 @@ export interface PineBotActivityLog {
   detail: string;
 }
 
+export type MarketNewsCategory = 'ALL' | 'INDIAN' | 'MCX' | 'INTERNATIONAL';
+
+export interface GroundingSource {
+  title: string;
+  uri: string;
+}
+
+export interface MarketNewsItem {
+  headline: string;
+  summary: string;
+  impactDirection: 'BULLISH' | 'BEARISH' | 'VOLATILE' | 'NEUTRAL';
+  impactLevel: 'HIGH' | 'MEDIUM' | 'LOW';
+  marketScope: 'INDIAN' | 'MCX' | 'INTERNATIONAL';
+  affectedAssets: string[];
+  publishedTime: string;
+  sourceName: string;
+  sourceUrl?: string;
+}
+
+export interface LiveMarketNewsResponse {
+  category: MarketNewsCategory;
+  query: string;
+  fetchedAt: string;
+  marketBrief: string;
+  items: MarketNewsItem[];
+  groundingSources: GroundingSource[];
+  cached?: boolean;
+}

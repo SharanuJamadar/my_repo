@@ -165,7 +165,7 @@ export function createLocalTrade(
     ...entry,
     id: makeId('trd'),
     userId: 'local-standalone',
-    strategyConfirmation: entry.strategyConfirmation || 'SHARAN setup',
+    strategyConfirmation: entry.strategyConfirmation || 'My Trade setup',
     createdAt: now,
     updatedAt: now,
   };

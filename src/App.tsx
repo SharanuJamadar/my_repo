@@ -9,6 +9,7 @@ import {
   Menu,
   ScanSearch,
   Settings,
+  Smartphone,
   UserCog,
   X,
 } from 'lucide-react';
@@ -104,6 +105,9 @@ import { OrderExecutionModal } from './components/OrderExecutionModal';
 import { BrokerConnectModal } from './components/BrokerConnectModal';
 import { ClassicLandingPage } from './components/ClassicLandingPage';
 import { AccountOnboardingView } from './components/AccountOnboardingView';
+import { PWAInstallButton } from './components/PWAInstallButton';
+import { OfflineIndicator } from './components/OfflineIndicator';
+import { MobilePlayStoreSection } from './components/MobilePlayStoreSection';
 
 type ViewStage = 'landing' | 'onboarding' | 'workspace';
 
@@ -113,7 +117,8 @@ type NavTab =
   | 'analyzer'
   | 'journal'
   | 'account'
-  | 'settings';
+  | 'settings'
+  | 'mobile';
 
 const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -122,6 +127,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ classN
   { id: 'journal', label: 'Trade Journal', icon: BookOpen },
   { id: 'account', label: 'Account Settings', icon: UserCog },
   { id: 'settings', label: 'Admin Settings', icon: Settings },
+  { id: 'mobile', label: 'Mobile & Play Store', icon: Smartphone },
 ];
 
 function TerminalWorkspace() {
@@ -503,7 +509,7 @@ function TerminalWorkspace() {
     const { userId: _u, updatedAt: _t, ...restConfig } = config;
     const nextConfig = {
       ...restConfig,
-      brokerProviderLabel: 'SHARAN Paper Engine · Demo Active',
+      brokerProviderLabel: 'My Trade Paper Engine · Demo Active',
       paperTradingOnly: true,
     };
 
@@ -766,7 +772,7 @@ function TerminalWorkspace() {
         config.paperTradingOnly || !integrationStatus.brokerConfigured ? 'PAPER' : 'LIVE';
       const signalId = `sig-${Date.now()}-${sig.instrument.replace(/[^A-Z0-9]/gi, '')}`;
       const brokerLabel =
-        config.brokerProviderLabel || 'SHARAN Paper Trading Engine';
+        config.brokerProviderLabel || 'My Trade Paper Trading Engine';
 
       const res = await fetch('/api/orders/execute', {
         method: 'POST',
@@ -920,7 +926,7 @@ function TerminalWorkspace() {
               reasonsFor: [evalRes.reason],
               reasonsAgainst: [],
               formattedSignalText: `${strategy.name}: ${evalRes.action} ${evalRes.instrument.symbol} @ ${evalRes.price}`,
-              telegramReadyText: `SHARAN PINE BOT · ${strategy.name}\n${evalRes.action} ${evalRes.instrument.symbol} @ ${evalRes.price}\nSL: ${evalRes.stopLoss} | T1: ${evalRes.target1}`,
+              telegramReadyText: `MY TRADE PINE BOT · ${strategy.name}\n${evalRes.action} ${evalRes.instrument.symbol} @ ${evalRes.price}\nSL: ${evalRes.stopLoss} | T1: ${evalRes.target1}`,
             };
 
             try {
@@ -1186,7 +1192,7 @@ function TerminalWorkspace() {
             }}
             className="font-classic-serif text-lg font-semibold tracking-tight text-white whitespace-nowrap shrink-0"
           >
-            SHARAN
+            My Trade
           </a>
         </div>
 
@@ -1276,6 +1282,14 @@ function TerminalWorkspace() {
             })}
           </div>
 
+          <div className="pt-4 border-t border-white/[0.06]">
+            <PWAInstallButton
+              onOpenMobileHub={() => {
+                setActiveTab('mobile');
+                setMobileMenuOpen(false);
+              }}
+            />
+          </div>
         </aside>
 
         {/* Main Workspace Content */}
@@ -1536,6 +1550,8 @@ function TerminalWorkspace() {
               pineStrategies={pineStrategies}
             />
           )}
+
+          {activeTab === 'mobile' && <MobilePlayStoreSection />}
         </main>
       </div>
 
@@ -1574,6 +1590,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <TerminalWorkspace />
+      <OfflineIndicator />
     </ErrorBoundary>
   );
 }

@@ -412,7 +412,7 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
       result: 'OPEN',
       pnl: 0,
       riskReward: rr,
-      strategyConfirmation: newNotes.trim() || 'SHARAN manual log',
+      strategyConfirmation: newNotes.trim() || 'My Trade manual log',
     });
 
     setShowAddModal(false);

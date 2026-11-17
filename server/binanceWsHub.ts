@@ -182,7 +182,7 @@ export function attachBinanceWsHub(httpServer: HttpServer): void {
 
     socket.on('open', () => {
       currentRetry = 2000;
-      console.log(`[SHARAN WS] Connected to ${label}`);
+      console.log(`[My Trade WS] Connected to ${label}`);
     });
 
     socket.on('message', handleBinanceFrame);

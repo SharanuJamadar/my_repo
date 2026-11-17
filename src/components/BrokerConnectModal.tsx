@@ -161,7 +161,7 @@ export const BrokerConnectModal: React.FC<BrokerConnectModalProps> = ({
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
               <span>
                 {selectedBroker.id === 'PAPER_ENGINE'
-                  ? 'SHARAN Paper Engine executes instantly against your Demo Trading Wallet with live mark-to-market P&L.'
+                  ? 'My Trade Paper Engine executes instantly against your Demo Trading Wallet with live mark-to-market P&L.'
                   : hasServerCredentials
                     ? `Server credentials (${selectedBroker.envHint}) are detected. Live execution can be enabled via Order Confirmation.`
                     : `No broker API secrets are stored in browser inputs. Connecting links ${selectedBroker.name} to your account profile in Paper-Linked mode; configure ${selectedBroker.envHint} in server environment secrets when ready for live routing.`}
