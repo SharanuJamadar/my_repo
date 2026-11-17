@@ -1,0 +1,234 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Authenticated trader profile and role metadata",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "displayName": { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "format": "email", "maxLength": 200 },
+        "photoURL": { "type": "string", "maxLength": 500 },
+        "role": { "type": "string", "enum": ["trader", "admin"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "displayName", "email", "role", "createdAt", "updatedAt"]
+    },
+    "StrategyConfig": {
+      "title": "StrategyConfig",
+      "description": "Configurable KWIK TRADE SHASHANK strategy and integration parameters",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "emaFast": { "type": "integer" },
+        "emaMid": { "type": "integer" },
+        "emaSlow": { "type": "integer" },
+        "rsiPeriod": { "type": "integer" },
+        "rsiBullishMin": { "type": "number" },
+        "rsiBearishMax": { "type": "number" },
+        "trendTimeframe": { "type": "string", "enum": ["15m", "1h", "4h"] },
+        "entryTimeframe": { "type": "string", "enum": ["5m", "15m"] },
+        "minSetupScore": { "type": "integer" },
+        "minRiskReward": { "type": "number" },
+        "maxRiskPerTradePct": { "type": "number" },
+        "prioritizeAtmOptions": { "type": "boolean" },
+        "comexCrudeEma9Priority": { "type": "boolean" },
+        "paperTradingOnly": { "type": "boolean" },
+        "autoBroadcastTelegram": { "type": "boolean" },
+        "telegramChannelLabel": { "type": "string", "maxLength": 100 },
+        "dataProviderLabel": { "type": "string", "maxLength": 80 },
+        "brokerProviderLabel": { "type": "string", "maxLength": 80 },
+        "killSwitchActive": { "type": "boolean" },
+        "activeInstruments": { "type": "array", "maxLength": 20 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "emaFast", "emaMid", "emaSlow", "rsiPeriod",
+        "rsiBullishMin", "rsiBearishMax", "trendTimeframe", "entryTimeframe",
+        "minSetupScore", "minRiskReward", "maxRiskPerTradePct",
+        "prioritizeAtmOptions", "comexCrudeEma9Priority", "paperTradingOnly",
+        "autoBroadcastTelegram", "killSwitchActive", "activeInstruments", "updatedAt"
+      ]
+    },
+    "TradeSignal": {
+      "title": "TradeSignal",
+      "description": "AI-generated multi-timeframe trade signal or NO TRADE evaluation",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "instrument": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "marketSegment": { "type": "string", "enum": ["INDIAN", "MCX", "INTERNATIONAL"] },
+        "contract": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "direction": { "type": "string", "enum": ["BUY", "SELL", "NO_TRADE"] },
+        "entryTrigger": { "type": "string", "maxLength": 60 },
+        "entryPrice": { "type": "number" },
+        "stopLoss": { "type": "number" },
+        "target1": { "type": "number" },
+        "target2": { "type": "number" },
+        "target3": { "type": "number" },
+        "riskReward": { "type": "string", "maxLength": 20 },
+        "entryTimeframe": { "type": "string", "maxLength": 20 },
+        "trendTimeframe": { "type": "string", "maxLength": 20 },
+        "horizon": { "type": "string", "maxLength": 30 },
+        "invalidationLevel": { "type": "number" },
+        "confirmationText": { "type": "string", "maxLength": 500 },
+        "status": { "type": "string", "enum": ["ACTIVE", "WAIT", "INVALIDATED", "TARGET_HIT", "SL_HIT", "NO_TRADE"] },
+        "qualityScore": { "type": "integer" },
+        "checklistSummary": { "type": "array", "maxLength": 12 },
+        "reasonsFor": { "type": "array", "maxLength": 10 },
+        "reasonsAgainst": { "type": "array", "maxLength": 10 },
+        "sourceType": { "type": "string", "enum": ["LIVE_MARKET", "CHART_UPLOAD", "CHATBOT"] },
+        "telegramPublished": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "instrument", "marketSegment", "contract", "direction",
+        "entryPrice", "stopLoss", "target1", "target2", "riskReward",
+        "entryTimeframe", "trendTimeframe", "horizon", "confirmationText",
+        "status", "qualityScore", "sourceType", "telegramPublished",
+        "createdAt", "updatedAt"
+      ]
+    },
+    "TradeJournalEntry": {
+      "title": "TradeJournalEntry",
+      "description": "Recorded paper or live trade journal entry with PnL and outcome tracking",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "signalId": { "type": "string", "maxLength": 128 },
+        "instrument": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "contract": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "direction": { "type": "string", "enum": ["BUY", "SELL"] },
+        "executionMode": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "entryPrice": { "type": "number" },
+        "stopLoss": { "type": "number" },
+        "target1": { "type": "number" },
+        "target2": { "type": "number" },
+        "target3": { "type": "number" },
+        "exitPrice": { "type": "number" },
+        "quantity": { "type": "number" },
+        "status": { "type": "string", "enum": ["OPEN", "CLOSED"] },
+        "result": { "type": "string", "enum": ["WIN", "LOSS", "BREAKEVEN", "OPEN"] },
+        "pnl": { "type": "number" },
+        "riskReward": { "type": "string", "maxLength": 20 },
+        "strategyConfirmation": { "type": "string", "maxLength": 500 },
+        "screenshotNote": { "type": "string", "maxLength": 300 },
+        "brokerOrderId": { "type": "string", "maxLength": 80 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "instrument", "contract", "direction", "executionMode",
+        "entryPrice", "stopLoss", "target1", "quantity", "status", "result",
+        "pnl", "riskReward", "strategyConfirmation", "createdAt", "updatedAt"
+      ]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "AI Trading Assistant conversation entry",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "role": { "type": "string", "enum": ["user", "assistant"] },
+        "content": { "type": "string", "minLength": 1, "maxLength": 8000 },
+        "instrumentContext": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "role", "content", "createdAt"]
+    },
+    "TelegramLog": {
+      "title": "TelegramLog",
+      "description": "Audit log of Telegram channel broadcasts",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "signalId": { "type": "string", "maxLength": 128 },
+        "instrument": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "eventType": { "type": "string", "enum": ["SIGNAL", "TARGET_HIT", "SL_HIT", "MARKET_UPDATE"] },
+        "messageText": { "type": "string", "minLength": 1, "maxLength": 4096 },
+        "deliveryStatus": { "type": "string", "enum": ["SENT", "FAILED", "NOT_CONFIGURED"] },
+        "statusDetail": { "type": "string", "maxLength": 300 },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "instrument", "eventType", "messageText", "deliveryStatus", "createdAt"]
+    },
+    "ExecutionOrder": {
+      "title": "ExecutionOrder",
+      "description": "Broker execution order record with explicit approval and duplicate guard",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "signalId": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "instrument": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "contract": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "expiry": { "type": "string", "maxLength": 40 },
+        "quantity": { "type": "number" },
+        "orderType": { "type": "string", "enum": ["MARKET", "LIMIT", "SL-M"] },
+        "side": { "type": "string", "enum": ["BUY", "SELL"] },
+        "entryPrice": { "type": "number" },
+        "stopLoss": { "type": "number" },
+        "targetPrice": { "type": "number" },
+        "executionMode": { "type": "string", "enum": ["PAPER", "LIVE"] },
+        "brokerName": { "type": "string", "maxLength": 60 },
+        "brokerOrderId": { "type": "string", "maxLength": 80 },
+        "status": { "type": "string", "enum": ["CONFIRMED_PAPER", "SUBMITTED_LIVE", "REJECTED", "KILLED"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "userId", "signalId", "instrument", "contract", "quantity",
+        "orderType", "side", "entryPrice", "stopLoss", "targetPrice",
+        "executionMode", "brokerName", "status", "createdAt", "updatedAt"
+      ]
+    },
+    "DemoWallet": {
+      "title": "DemoWallet",
+      "description": "User virtual demo trading wallet balance and recent deposit audit entries",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "balance": { "type": "number" },
+        "totalAdded": { "type": "number" },
+        "recentDeposits": { "type": "array", "maxLength": 20 },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "balance", "totalAdded", "recentDeposits", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Trader user profile and role document"
+    },
+    "/strategyConfigs/{userId}": {
+      "schema": { "$ref": "#/entities/StrategyConfig" },
+      "description": "User strategy engine & integration configuration"
+    },
+    "/signals/{signalId}": {
+      "schema": { "$ref": "#/entities/TradeSignal" },
+      "description": "Generated AI multi-timeframe trade signals"
+    },
+    "/trades/{tradeId}": {
+      "schema": { "$ref": "#/entities/TradeJournalEntry" },
+      "description": "Trade journal and performance records"
+    },
+    "/chatMessages/{messageId}": {
+      "schema": { "$ref": "#/entities/ChatMessage" },
+      "description": "AI Trading Assistant message history"
+    },
+    "/telegramLogs/{logId}": {
+      "schema": { "$ref": "#/entities/TelegramLog" },
+      "description": "Telegram signal broadcast audit logs"
+    },
+    "/executionOrders/{orderId}": {
+      "schema": { "$ref": "#/entities/ExecutionOrder" },
+      "description": "Order execution audit records"
+    },
+    "/demoWallets/{userId}": {
+      "schema": { "$ref": "#/entities/DemoWallet" },
+      "description": "User demo wallet capital and deposit history"
+    }
+  }
+}

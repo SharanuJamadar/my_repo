@@ -1,0 +1,444 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Hardened Primitives ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerifiedUser() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isOwner(uid) {
+      return isVerifiedUser() && request.auth.uid == uid;
+    }
+
+    function isBootstrappedAdmin() {
+      return isVerifiedUser() && request.auth.token.email == 'sharanu12131415@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidBoundedStringList(arr, maxItems) {
+      return arr is list && arr.size() <= maxItems && (arr.size() == 0 || arr[0] is string);
+    }
+
+    // --- Validation Blueprints ---
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'displayName', 'email', 'role', 'createdAt', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'displayName', 'email', 'photoURL', 'role', 'createdAt', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == userId
+        && isValidString(data.displayName, 1, 100)
+        && isValidString(data.email, 3, 200)
+        && (!('photoURL' in data) || isValidString(data.photoURL, 0, 500))
+        && data.role in ['trader', 'admin']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidStrategyConfig(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'emaFast', 'emaMid', 'emaSlow', 'rsiPeriod',
+          'rsiBullishMin', 'rsiBearishMax', 'trendTimeframe', 'entryTimeframe',
+          'minSetupScore', 'minRiskReward', 'maxRiskPerTradePct',
+          'prioritizeAtmOptions', 'comexCrudeEma9Priority', 'paperTradingOnly',
+          'autoBroadcastTelegram', 'killSwitchActive', 'activeInstruments', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'emaFast', 'emaMid', 'emaSlow', 'rsiPeriod',
+          'rsiBullishMin', 'rsiBearishMax', 'trendTimeframe', 'entryTimeframe',
+          'minSetupScore', 'minRiskReward', 'maxRiskPerTradePct',
+          'prioritizeAtmOptions', 'comexCrudeEma9Priority', 'paperTradingOnly',
+          'autoBroadcastTelegram', 'telegramChannelLabel', 'dataProviderLabel',
+          'brokerProviderLabel', 'killSwitchActive', 'activeInstruments', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && data.userId == userId
+        && data.emaFast is int && data.emaFast >= 2 && data.emaFast <= 50
+        && data.emaMid is int && data.emaMid >= 5 && data.emaMid <= 100
+        && data.emaSlow is int && data.emaSlow >= 20 && data.emaSlow <= 200
+        && data.rsiPeriod is int && data.rsiPeriod >= 5 && data.rsiPeriod <= 30
+        && data.rsiBullishMin is number && data.rsiBullishMin >= 30 && data.rsiBullishMin <= 80
+        && data.rsiBearishMax is number && data.rsiBearishMax >= 20 && data.rsiBearishMax <= 70
+        && data.trendTimeframe in ['15m', '1h', '4h']
+        && data.entryTimeframe in ['5m', '15m']
+        && data.minSetupScore is int && data.minSetupScore >= 40 && data.minSetupScore <= 95
+        && data.minRiskReward is number && data.minRiskReward >= 1 && data.minRiskReward <= 10
+        && data.maxRiskPerTradePct is number && data.maxRiskPerTradePct >= 0.25 && data.maxRiskPerTradePct <= 10
+        && data.prioritizeAtmOptions is bool
+        && data.comexCrudeEma9Priority is bool
+        && data.paperTradingOnly is bool
+        && data.autoBroadcastTelegram is bool
+        && (!('telegramChannelLabel' in data) || isValidString(data.telegramChannelLabel, 0, 100))
+        && (!('dataProviderLabel' in data) || isValidString(data.dataProviderLabel, 0, 80))
+        && (!('brokerProviderLabel' in data) || isValidString(data.brokerProviderLabel, 0, 80))
+        && data.killSwitchActive is bool
+        && isValidBoundedStringList(data.activeInstruments, 20)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTradeSignal(data) {
+      return data.keys().hasAll([
+          'userId', 'instrument', 'marketSegment', 'contract', 'direction',
+          'entryPrice', 'stopLoss', 'target1', 'target2', 'riskReward',
+          'entryTimeframe', 'trendTimeframe', 'horizon', 'confirmationText',
+          'status', 'qualityScore', 'sourceType', 'telegramPublished',
+          'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'instrument', 'marketSegment', 'contract', 'direction',
+          'entryTrigger', 'entryPrice', 'stopLoss', 'target1', 'target2', 'target3',
+          'riskReward', 'entryTimeframe', 'trendTimeframe', 'horizon',
+          'invalidationLevel', 'confirmationText', 'status', 'qualityScore',
+          'checklistSummary', 'reasonsFor', 'reasonsAgainst', 'sourceType',
+          'telegramPublished', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && isValidString(data.instrument, 1, 40)
+        && data.marketSegment in ['INDIAN', 'MCX', 'INTERNATIONAL']
+        && isValidString(data.contract, 1, 80)
+        && data.direction in ['BUY', 'SELL', 'NO_TRADE']
+        && (!('entryTrigger' in data) || isValidString(data.entryTrigger, 0, 60))
+        && data.entryPrice is number && data.entryPrice >= 0
+        && data.stopLoss is number && data.stopLoss >= 0
+        && data.target1 is number && data.target1 >= 0
+        && data.target2 is number && data.target2 >= 0
+        && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
+        && isValidString(data.riskReward, 1, 20)
+        && isValidString(data.entryTimeframe, 1, 20)
+        && isValidString(data.trendTimeframe, 1, 20)
+        && isValidString(data.horizon, 1, 30)
+        && (!('invalidationLevel' in data) || (data.invalidationLevel is number && data.invalidationLevel >= 0))
+        && isValidString(data.confirmationText, 1, 500)
+        && data.status in ['ACTIVE', 'WAIT', 'INVALIDATED', 'TARGET_HIT', 'SL_HIT', 'NO_TRADE']
+        && data.qualityScore is int && data.qualityScore >= 0 && data.qualityScore <= 100
+        && (!('checklistSummary' in data) || isValidBoundedStringList(data.checklistSummary, 12))
+        && (!('reasonsFor' in data) || isValidBoundedStringList(data.reasonsFor, 10))
+        && (!('reasonsAgainst' in data) || isValidBoundedStringList(data.reasonsAgainst, 10))
+        && data.sourceType in ['LIVE_MARKET', 'CHART_UPLOAD', 'CHATBOT']
+        && data.telegramPublished is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidTradeJournalEntry(data) {
+      return data.keys().hasAll([
+          'userId', 'instrument', 'contract', 'direction', 'executionMode',
+          'entryPrice', 'stopLoss', 'target1', 'quantity', 'status', 'result',
+          'pnl', 'riskReward', 'strategyConfirmation', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'signalId', 'instrument', 'contract', 'direction', 'executionMode',
+          'entryPrice', 'stopLoss', 'target1', 'target2', 'target3', 'exitPrice',
+          'quantity', 'status', 'result', 'pnl', 'riskReward',
+          'strategyConfirmation', 'screenshotNote', 'brokerOrderId', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && (!('signalId' in data) || isValidString(data.signalId, 0, 128))
+        && isValidString(data.instrument, 1, 40)
+        && isValidString(data.contract, 1, 80)
+        && data.direction in ['BUY', 'SELL']
+        && data.executionMode in ['PAPER', 'LIVE']
+        && data.entryPrice is number && data.entryPrice > 0
+        && data.stopLoss is number && data.stopLoss >= 0
+        && data.target1 is number && data.target1 >= 0
+        && (!('target2' in data) || (data.target2 is number && data.target2 >= 0))
+        && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
+        && (!('exitPrice' in data) || (data.exitPrice is number && data.exitPrice >= 0))
+        && data.quantity is number && data.quantity > 0
+        && data.status in ['OPEN', 'CLOSED']
+        && data.result in ['WIN', 'LOSS', 'BREAKEVEN', 'OPEN']
+        && data.pnl is number
+        && isValidString(data.riskReward, 1, 20)
+        && isValidString(data.strategyConfirmation, 1, 500)
+        && (!('screenshotNote' in data) || isValidString(data.screenshotNote, 0, 300))
+        && (!('brokerOrderId' in data) || isValidString(data.brokerOrderId, 0, 80))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidChatMessage(data) {
+      return data.keys().hasAll(['userId', 'role', 'content', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'role', 'content', 'instrumentContext', 'createdAt'])
+        && isValidId(data.userId)
+        && data.role in ['user', 'assistant']
+        && isValidString(data.content, 1, 8000)
+        && (!('instrumentContext' in data) || isValidString(data.instrumentContext, 0, 40))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidTelegramLog(data) {
+      return data.keys().hasAll(['userId', 'instrument', 'eventType', 'messageText', 'deliveryStatus', 'createdAt'])
+        && data.keys().hasOnly(['userId', 'signalId', 'instrument', 'eventType', 'messageText', 'deliveryStatus', 'statusDetail', 'createdAt'])
+        && isValidId(data.userId)
+        && (!('signalId' in data) || isValidString(data.signalId, 0, 128))
+        && isValidString(data.instrument, 1, 40)
+        && data.eventType in ['SIGNAL', 'TARGET_HIT', 'SL_HIT', 'MARKET_UPDATE']
+        && isValidString(data.messageText, 1, 4096)
+        && data.deliveryStatus in ['SENT', 'FAILED', 'NOT_CONFIGURED']
+        && (!('statusDetail' in data) || isValidString(data.statusDetail, 0, 300))
+        && data.createdAt is timestamp;
+    }
+
+    function isValidExecutionOrder(data) {
+      return data.keys().hasAll([
+          'userId', 'signalId', 'instrument', 'contract', 'quantity',
+          'orderType', 'side', 'entryPrice', 'stopLoss', 'targetPrice',
+          'executionMode', 'brokerName', 'status', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'signalId', 'instrument', 'contract', 'expiry', 'quantity',
+          'orderType', 'side', 'entryPrice', 'stopLoss', 'targetPrice',
+          'executionMode', 'brokerName', 'brokerOrderId', 'status', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && isValidId(data.signalId)
+        && isValidString(data.instrument, 1, 40)
+        && isValidString(data.contract, 1, 80)
+        && (!('expiry' in data) || isValidString(data.expiry, 0, 40))
+        && data.quantity is number && data.quantity > 0
+        && data.orderType in ['MARKET', 'LIMIT', 'SL-M']
+        && data.side in ['BUY', 'SELL']
+        && data.entryPrice is number && data.entryPrice > 0
+        && data.stopLoss is number && data.stopLoss >= 0
+        && data.targetPrice is number && data.targetPrice >= 0
+        && data.executionMode in ['PAPER', 'LIVE']
+        && isValidString(data.brokerName, 1, 60)
+        && (!('brokerOrderId' in data) || isValidString(data.brokerOrderId, 0, 80))
+        && data.status in ['CONFIRMED_PAPER', 'SUBMITTED_LIVE', 'REJECTED', 'KILLED']
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidDemoWallet(data, userId) {
+      return data.keys().hasAll(['userId', 'balance', 'totalAdded', 'recentDeposits', 'updatedAt'])
+        && data.keys().hasOnly(['userId', 'balance', 'totalAdded', 'recentDeposits', 'updatedAt'])
+        && isValidId(data.userId)
+        && data.userId == userId
+        && data.balance is number && data.balance >= 0
+        && data.totalAdded is number && data.totalAdded >= 0
+        && isValidBoundedStringList(data.recentDeposits, 20)
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Collection Rules ---
+
+    match /admins/{adminUid} {
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isBootstrappedAdmin());
+      allow list: if false;
+      allow create, update, delete: if isValidId(adminUid) && isBootstrappedAdmin();
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time
+        && (incoming().role == 'trader' || isBootstrappedAdmin());
+      allow update: if isValidId(userId)
+        && isValidUserProfile(incoming(), userId)
+        && incoming().uid == existing().uid
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().role == existing().role
+            && incoming().diff(existing()).affectedKeys().hasOnly(['displayName', 'photoURL', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /strategyConfigs/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidStrategyConfig(incoming(), userId)
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isValidStrategyConfig(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'emaFast', 'emaMid', 'emaSlow', 'rsiPeriod', 'rsiBullishMin', 'rsiBearishMax',
+              'trendTimeframe', 'entryTimeframe', 'minSetupScore', 'minRiskReward',
+              'maxRiskPerTradePct', 'prioritizeAtmOptions', 'comexCrudeEma9Priority',
+              'paperTradingOnly', 'autoBroadcastTelegram', 'telegramChannelLabel',
+              'dataProviderLabel', 'brokerProviderLabel', 'killSwitchActive',
+              'activeInstruments', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /signals/{signalId} {
+      allow get: if isValidId(signalId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(signalId)
+        && isVerifiedUser()
+        && isValidTradeSignal(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(signalId)
+        && isVerifiedUser()
+        && isValidTradeSignal(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().userId == request.auth.uid
+            && !(existing().status in ['INVALIDATED', 'TARGET_HIT', 'SL_HIT'])
+            && (
+              incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+              || incoming().diff(existing()).affectedKeys().hasOnly(['telegramPublished', 'updatedAt'])
+              || incoming().diff(existing()).affectedKeys().hasOnly(['status', 'telegramPublished', 'updatedAt'])
+            )
+          )
+        );
+      allow delete: if isValidId(signalId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    match /trades/{tradeId} {
+      allow get: if isValidId(tradeId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(tradeId)
+        && isVerifiedUser()
+        && isValidTradeJournalEntry(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(tradeId)
+        && isVerifiedUser()
+        && isValidTradeJournalEntry(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().userId == request.auth.uid
+            && existing().status == 'OPEN'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'exitPrice', 'status', 'result', 'pnl', 'screenshotNote', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(tradeId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    match /chatMessages/{messageId} {
+      allow get: if isValidId(messageId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(messageId)
+        && isVerifiedUser()
+        && isValidChatMessage(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(messageId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+    }
+
+    match /telegramLogs/{logId} {
+      allow get: if isValidId(logId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(logId)
+        && isVerifiedUser()
+        && isValidTelegramLog(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time;
+      allow update: if false;
+      allow delete: if isValidId(logId) && isAdmin();
+    }
+
+    match /executionOrders/{orderId} {
+      allow get: if isValidId(orderId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(orderId)
+        && isVerifiedUser()
+        && isValidExecutionOrder(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(orderId)
+        && isVerifiedUser()
+        && isValidExecutionOrder(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().userId == request.auth.uid
+            && !(existing().status in ['REJECTED', 'KILLED'])
+            && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'brokerOrderId', 'updatedAt'])
+          )
+        );
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+
+    match /demoWallets/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidDemoWallet(incoming(), userId)
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isValidDemoWallet(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'balance', 'totalAdded', 'recentDeposits', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+  }
+}

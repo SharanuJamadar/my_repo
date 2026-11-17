@@ -1,0 +1,8 @@
+{
+  "name": "Sharan",
+  "description": "AI-powered multi-timeframe trading analysis, chart inspection, and signal generation terminal.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
