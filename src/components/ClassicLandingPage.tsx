@@ -107,50 +107,63 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
       void loadTape();
     }, 6000);
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws/market?instrument=ALL`);
-    wsRef.current = ws;
+    let ws: WebSocket | null = null;
+    try {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      ws = new WebSocket(`${protocol}//${window.location.host}/ws/market?instrument=ALL`);
+      wsRef.current = ws;
 
-    ws.onmessage = (event) => {
-      if (!active) return;
-      try {
-        const payload = JSON.parse(event.data);
-        const incomingTicks: { streamSymbol: string; price: number }[] =
-          payload.type === 'snapshot' || payload.type === 'ticks'
-            ? Array.isArray(payload.ticks)
-              ? payload.ticks
-              : []
-            : [];
-        if (incomingTicks.length === 0) return;
+      ws.onmessage = (event) => {
+        if (!active) return;
+        try {
+          const payload = JSON.parse(event.data);
+          const incomingTicks: { streamSymbol: string; price: number }[] =
+            payload.type === 'snapshot' || payload.type === 'ticks'
+              ? Array.isArray(payload.ticks)
+                ? payload.ticks
+                : []
+              : [];
+          if (incomingTicks.length === 0) return;
 
-        setTapeQuotes((prev) => {
-          if (prev.length === 0) return prev;
-          const updates = new Map<string, number>();
-          for (const t of incomingTicks) {
-            const ids = STREAM_SYMBOL_TO_IDS[t.streamSymbol];
-            if (ids && Number.isFinite(t.price)) {
-              for (const id of ids) updates.set(id, t.price);
+          setTapeQuotes((prev) => {
+            if (prev.length === 0) return prev;
+            const updates = new Map<string, number>();
+            for (const t of incomingTicks) {
+              const ids = STREAM_SYMBOL_TO_IDS[t.streamSymbol];
+              if (ids && Number.isFinite(t.price)) {
+                for (const id of ids) updates.set(id, t.price);
+              }
             }
-          }
-          if (updates.size === 0) return prev;
-          return prev.map((item) => {
-            const nextP = updates.get(item.instrument.id);
-            if (nextP === undefined || nextP === item.price) return item;
-            const prevClose = item.previousClose ?? item.open ?? item.price;
-            const changePercent = prevClose ? ((nextP - prevClose) / prevClose) * 100 : item.changePercent;
-            return { ...item, price: nextP, changePercent };
+            if (updates.size === 0) return prev;
+            return prev.map((item) => {
+              const nextP = updates.get(item.instrument.id);
+              if (nextP === undefined || nextP === item.price) return item;
+              const prevClose = item.previousClose ?? item.open ?? item.price;
+              const changePercent = prevClose ? ((nextP - prevClose) / prevClose) * 100 : item.changePercent;
+              return { ...item, price: nextP, changePercent };
+            });
           });
-        });
-      } catch {
-        // Ignore malformed frame
-      }
-    };
+        } catch {
+          // Ignore malformed frame
+        }
+      };
+
+      ws.onerror = () => {
+        try {
+          ws?.close();
+        } catch {
+          // ignore
+        }
+      };
+    } catch {
+      ws = null;
+    }
 
     return () => {
       active = false;
       window.clearInterval(poll);
       try {
-        ws.close();
+        ws?.close();
       } catch {
         // ignore
       }

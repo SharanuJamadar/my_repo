@@ -1,11 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  History,
   Plus,
   RefreshCw,
-  RotateCcw,
   Trash2,
-  Wallet,
   X,
 } from 'lucide-react';
 import {
@@ -20,8 +17,6 @@ import {
 interface TradeJournalViewProps {
   trades: TradeJournalEntry[];
   wallet: DemoWalletState;
-  onAddDemoFunds: (amount: number, note?: string) => Promise<void>;
-  onResetDemoWallet: (newBalance: number) => Promise<void>;
   onCreateTrade: (
     entry: Omit<TradeJournalEntry, 'id' | 'userId' | 'createdAt' | 'updatedAt'>
   ) => Promise<void>;
@@ -61,13 +56,9 @@ function formatNumber(val: number, decimals = 2): string {
   });
 }
 
-const QUICK_FUND_AMOUNTS = [10000, 50000, 100000, 500000, 1000000];
-
 export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
   trades,
   wallet,
-  onAddDemoFunds,
-  onResetDemoWallet,
   onCreateTrade,
   onCloseTrade,
   onDeleteTrade,
@@ -79,13 +70,6 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
   const [closingTrade, setClosingTrade] = useState<TradeJournalEntry | null>(null);
   const [closeExitPrice, setCloseExitPrice] = useState('');
   const [closeNote, setCloseNote] = useState('');
-
-  // Demo wallet top-up UI state
-  const [customFundAmount, setCustomFundAmount] = useState('');
-  const [addingFunds, setAddingFunds] = useState(false);
-  const [walletBanner, setWalletBanner] = useState<string | null>(null);
-  const [showWalletHistory, setShowWalletHistory] = useState(false);
-  const [resetInput, setResetInput] = useState('100000');
 
   // Live price map keyed by InstrumentMeta.id + optional manual LTP overrides for option-premium entries
   const [liveFeedMap, setLiveFeedMap] = useState<Record<string, LiveFeedPoint>>({});
@@ -403,40 +387,6 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
     };
   }, [enrichedTrades, modeFilter, wallet.balance]);
 
-  const handleQuickAddFunds = async (amount: number, note?: string) => {
-    if (!Number.isFinite(amount) || amount <= 0) return;
-    setAddingFunds(true);
-    try {
-      await onAddDemoFunds(amount, note);
-      setWalletBanner(`Added +${formatNumber(amount, 0)} demo funds to wallet.`);
-      setTimeout(() => setWalletBanner(null), 3500);
-    } finally {
-      setAddingFunds(false);
-    }
-  };
-
-  const handleCustomFundSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amt = Number(customFundAmount);
-    if (!Number.isFinite(amt) || amt <= 0) return;
-    await handleQuickAddFunds(amt, 'Custom Demo Deposit');
-    setCustomFundAmount('');
-  };
-
-  const handleResetWalletSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const nextBal = Number(resetInput);
-    if (!Number.isFinite(nextBal) || nextBal < 0) return;
-    setAddingFunds(true);
-    try {
-      await onResetDemoWallet(nextBal);
-      setWalletBanner(`Demo wallet capital set to ${formatNumber(nextBal, 0)}.`);
-      setTimeout(() => setWalletBanner(null), 3500);
-    } finally {
-      setAddingFunds(false);
-    }
-  };
-
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const entry = Number(newEntry);
@@ -502,10 +452,10 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-semibold text-white">
-            Demo Wallet, Live P&L & Trade Journal
+            Live P&amp;L &amp; Trade Journal
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Unlimited demo capital top-ups · Real-time mark-to-market P&L and running risk ratios every 4 seconds
+            Real-time mark-to-market P&amp;L, running risk ratios, and closed trade history
             {lastPriceSyncAt ? ` · Feed updated ${new Date(lastPriceSyncAt).toLocaleTimeString()}` : ''}
           </p>
         </div>
@@ -540,164 +490,6 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
             Log Trade Entry
           </button>
         </div>
-      </div>
-
-      {/* Demo Wallet Capital & Unlimited Top-Up Console */}
-      <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-5 space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.06] pb-4">
-          <div className="flex items-center gap-3">
-            <Wallet className="w-5 h-5 text-emerald-400 shrink-0" />
-            <div>
-              <h3 className="text-sm font-semibold text-white">Demo Trading Wallet</h3>
-              <p className="text-[11px] text-slate-400">
-                Add any amount of demo funds instantaneously for paper sizing & live equity tracking
-              </p>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setShowWalletHistory((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded-lg whitespace-nowrap shrink-0"
-          >
-            <History className="w-3.5 h-3.5" />
-            {showWalletHistory ? 'Hide History & Reset' : 'Wallet History & Reset'}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <div className="text-[11px] text-slate-400">Wallet Deposited Capital</div>
-            <div className="font-mono-tabular text-xl font-bold text-white mt-0.5">
-              {formatNumber(wallet.balance, 2)}
-            </div>
-            <div className="text-[11px] text-slate-500 font-mono-tabular">
-              Lifetime Added: {formatNumber(wallet.totalAdded, 0)}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[11px] text-slate-400">Live Total Equity</div>
-            <div
-              className={`font-mono-tabular text-xl font-bold mt-0.5 ${
-                stats.totalLiveEquity >= wallet.balance ? 'text-emerald-400' : 'text-red-400'
-              }`}
-            >
-              {formatNumber(stats.totalLiveEquity, 2)}
-            </div>
-            <div className="text-[11px] text-slate-400 font-mono-tabular">
-              Net Combined: {stats.combinedPnl >= 0 ? '+' : ''}
-              {formatNumber(stats.combinedPnl, 2)}
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[11px] text-slate-400">Deployed Margin (Open)</div>
-            <div className="font-mono-tabular text-xl font-semibold text-white mt-0.5">
-              {formatNumber(stats.deployedMargin, 2)}
-            </div>
-            <div className="text-[11px] text-slate-400 font-mono-tabular">
-              Utilization: {stats.marginUtilizationPct.toFixed(1)}% ({stats.openCount} open)
-            </div>
-          </div>
-
-          <div>
-            <div className="text-[11px] text-slate-400">Free Available Demo Funds</div>
-            <div
-              className={`font-mono-tabular text-xl font-semibold mt-0.5 ${
-                stats.freeMargin >= 0 ? 'text-sky-300' : 'text-amber-300'
-              }`}
-            >
-              {formatNumber(stats.freeMargin, 2)}
-            </div>
-            <div className="text-[11px] text-slate-400">Ready for new paper allocations</div>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/[0.06]">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-xs text-slate-400 mr-1">Quick Add:</span>
-            {QUICK_FUND_AMOUNTS.map((amt) => (
-              <button
-                key={amt}
-                type="button"
-                disabled={addingFunds}
-                onClick={() => handleQuickAddFunds(amt, 'Quick Top-Up')}
-                className="px-2.5 py-1.5 text-xs font-mono-tabular font-medium bg-[#090B0E] hover:bg-emerald-600/20 border border-white/[0.08] hover:border-emerald-500/40 text-emerald-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
-              >
-                +{amt.toLocaleString()}
-              </button>
-            ))}
-          </div>
-
-          <form onSubmit={handleCustomFundSubmit} className="flex items-center gap-2">
-            <input
-              type="number"
-              min="1"
-              step="any"
-              value={customFundAmount}
-              onChange={(e) => setCustomFundAmount(e.target.value)}
-              placeholder="Enter any amount..."
-              className="w-44 bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs font-mono-tabular text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-            />
-            <button
-              type="submit"
-              disabled={addingFunds || !customFundAmount || Number(customFundAmount) <= 0}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Funds
-            </button>
-          </form>
-        </div>
-
-        {walletBanner && (
-          <div className="text-xs text-emerald-300 font-medium">{walletBanner}</div>
-        )}
-
-        {showWalletHistory && (
-          <div className="pt-3 border-t border-white/[0.06] grid grid-cols-1 lg:grid-cols-12 gap-4 text-xs">
-            <div className="lg:col-span-7 space-y-1.5">
-              <div className="font-semibold text-slate-200">Recent Wallet Deposits</div>
-              {wallet.recentDeposits.length === 0 ? (
-                <div className="text-slate-500">No deposits recorded yet.</div>
-              ) : (
-                <div className="max-h-28 overflow-y-auto space-y-1 font-mono-tabular text-[11px] text-slate-400">
-                  {wallet.recentDeposits.map((entry, idx) => (
-                    <div key={`${entry}-${idx}`}>{entry}</div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <form
-              onSubmit={handleResetWalletSubmit}
-              className="lg:col-span-5 flex flex-wrap items-end gap-2"
-            >
-              <div className="flex-1 min-w-[140px]">
-                <label className="block text-[11px] text-slate-400 mb-1">
-                  Set / Reset Demo Capital
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={resetInput}
-                  onChange={(e) => setResetInput(e.target.value)}
-                  className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs font-mono-tabular text-white"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={addingFunds}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-amber-300 rounded-lg whitespace-nowrap shrink-0"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                Reset Capital
-              </button>
-            </form>
-          </div>
-        )}
       </div>
 
       {/* Live P&L & All Running Performance Ratios */}

@@ -34,8 +34,19 @@ export function attachBinanceWsHub(httpServer: HttpServer): void {
   const clientSubs = new Map<WebSocket, MarketClientMeta>();
 
   const wss = new WebSocketServer({
-    server: httpServer,
-    path: '/ws/market',
+    noServer: true,
+  });
+
+  httpServer.on('upgrade', (req, socket, head) => {
+    try {
+      const parsed = new URL(req.url || '/', 'http://localhost');
+      if (parsed.pathname !== '/ws/market') return;
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit('connection', ws, req);
+      });
+    } catch {
+      socket.destroy();
+    }
   });
 
   function sendJson(ws: WebSocket, payload: unknown): void {

@@ -27,6 +27,7 @@ const KEYS = {
   orders: 'sharan_execution_orders_v1',
   account: 'sharan_account_profile_v1',
   pineStrategies: 'sharan_pine_strategies_v1',
+  customWatchlist: 'sharan_custom_watchlist_v1',
 };
 
 function readJson<T>(key: string, fallback: T): T {
@@ -297,12 +298,37 @@ export function addLocalDemoFunds(amount: number, note?: string): DemoWalletStat
   const current = loadLocalWallet();
   if (safeAmount <= 0) return current;
   const entry = `${new Date().toLocaleString()} | +${safeAmount.toLocaleString()} | ${
-    (note || 'Demo Top-Up').trim().slice(0, 40)
+    (note || 'Deposit').trim().slice(0, 40)
   }`;
   const next: DemoWalletState = {
     userId: 'local-standalone',
     balance: Number((current.balance + safeAmount).toFixed(2)),
     totalAdded: Number((current.totalAdded + safeAmount).toFixed(2)),
+    recentDeposits: [entry, ...current.recentDeposits].slice(0, 20),
+    updatedAt: new Date().toISOString(),
+  };
+  writeJson(KEYS.wallet, next);
+  return next;
+}
+
+export function withdrawLocalDemoFunds(amount: number, note?: string): DemoWalletState {
+  const safeAmount = Number.isFinite(amount) && amount > 0 ? Number(amount.toFixed(2)) : 0;
+  const current = loadLocalWallet();
+  if (safeAmount <= 0) {
+    throw new Error('Enter a valid withdrawal amount greater than 0.');
+  }
+  if (safeAmount > current.balance) {
+    throw new Error(
+      `Insufficient wallet balance. Available: ${current.balance.toLocaleString()}`
+    );
+  }
+  const entry = `${new Date().toLocaleString()} | -${safeAmount.toLocaleString()} | ${
+    (note || 'Withdrawal').trim().slice(0, 40)
+  }`;
+  const next: DemoWalletState = {
+    userId: 'local-standalone',
+    balance: Number(Math.max(0, current.balance - safeAmount).toFixed(2)),
+    totalAdded: current.totalAdded,
     recentDeposits: [entry, ...current.recentDeposits].slice(0, 20),
     updatedAt: new Date().toISOString(),
   };
@@ -408,4 +434,30 @@ export function deleteLocalPineStrategy(strategyId: string): PineStrategyRecord[
   writeJson(KEYS.pineStrategies, updated);
   return updated;
 }
+
+export function loadLocalCustomWatchlist(): string[] {
+  const saved = readJson<unknown>(KEYS.customWatchlist, []);
+  if (!Array.isArray(saved)) return [];
+  const validIds = new Set(INSTRUMENTS.map((i) => i.id));
+  const out: string[] = [];
+  for (const id of saved) {
+    if (typeof id === 'string' && validIds.has(id) && !out.includes(id)) {
+      out.push(id);
+    }
+  }
+  return out;
+}
+
+export function saveLocalCustomWatchlist(ids: string[]): string[] {
+  const validIds = new Set(INSTRUMENTS.map((i) => i.id));
+  const clean: string[] = [];
+  for (const id of ids) {
+    if (validIds.has(id) && !clean.includes(id)) {
+      clean.push(id);
+    }
+  }
+  writeJson(KEYS.customWatchlist, clean);
+  return clean;
+}
+
 

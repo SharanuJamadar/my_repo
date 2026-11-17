@@ -1,19 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import {
-  Activity,
   BookOpen,
   CandlestickChart,
   Cloud,
-  Code2,
   LayoutDashboard,
   LogOut,
   Menu,
-  MessageSquare,
   ScanSearch,
-  Send,
   Settings,
-  ShieldAlert,
   UserCog,
   X,
 } from 'lucide-react';
@@ -64,6 +59,7 @@ import {
   subscribeTelegramLogs,
   subscribeTrades,
   updateStoredSignalStatus,
+  withdrawDemoWalletFunds,
 } from './lib/firestoreStore';
 import {
   addLocalChatMessage,
@@ -91,6 +87,7 @@ import {
   saveLocalConfig,
   saveLocalPineStrategy,
   updateLocalSignalStatus,
+  withdrawLocalDemoFunds,
 } from './lib/localStore';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import {
@@ -99,14 +96,10 @@ import {
   type LivePricePoint,
 } from './components/DashboardView';
 import { TerminalView } from './components/TerminalView';
-import { WatchlistView } from './components/WatchlistView';
-import { ChartAnalysisBotView } from './components/ChartAnalysisBotView';
-import { ChatbotView } from './components/ChatbotView';
+import { AnalyzerHubView, type AnalyzerSubTab } from './components/AnalyzerHubView';
 import { TradeJournalView } from './components/TradeJournalView';
-import { ExecutionTelegramView } from './components/ExecutionTelegramView';
 import { AdminSettingsView } from './components/AdminSettingsView';
 import { AccountSettingsView } from './components/AccountSettingsView';
-import { PineStrategyBotView } from './components/PineStrategyBotView';
 import { OrderExecutionModal } from './components/OrderExecutionModal';
 import { BrokerConnectModal } from './components/BrokerConnectModal';
 import { ClassicLandingPage } from './components/ClassicLandingPage';
@@ -117,24 +110,16 @@ type ViewStage = 'landing' | 'onboarding' | 'workspace';
 type NavTab =
   | 'dashboard'
   | 'terminal'
-  | 'watchlist'
-  | 'pine-bot'
-  | 'chart-bot'
-  | 'chatbot'
+  | 'analyzer'
   | 'journal'
-  | 'execution'
   | 'account'
   | 'settings';
 
 const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'terminal', label: 'Terminal', icon: CandlestickChart },
-  { id: 'watchlist', label: 'Watchlist', icon: Activity },
-  { id: 'pine-bot', label: 'Pine Strategy & Bot', icon: Code2 },
-  { id: 'chart-bot', label: 'Chart AI', icon: ScanSearch },
-  { id: 'chatbot', label: 'AI Assistant', icon: MessageSquare },
+  { id: 'analyzer', label: 'Analyzer', icon: ScanSearch },
   { id: 'journal', label: 'Trade Journal', icon: BookOpen },
-  { id: 'execution', label: 'Telegram & Orders', icon: Send },
   { id: 'account', label: 'Account Settings', icon: UserCog },
   { id: 'settings', label: 'Admin Settings', icon: Settings },
 ];
@@ -150,6 +135,7 @@ function TerminalWorkspace() {
   const redirectAfterLoginRef = useRef(false);
 
   const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [analyzerSubTab, setAnalyzerSubTab] = useState<AnalyzerSubTab>('auto-analyzer');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Standalone localStorage state (immediate access without requiring any app connection)
@@ -216,8 +202,8 @@ function TerminalWorkspace() {
   const [autoScanResults, setAutoScanResults] = useState<AutoScanMarketItem[]>([]);
   const [autoScanLoading, setAutoScanLoading] = useState(false);
   const [lastAutoScanAt, setLastAutoScanAt] = useState<string | null>(null);
-  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
-  const [autoExecuteEnabled, setAutoExecuteEnabled] = useState(true);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(false);
+  const [autoExecuteEnabled, setAutoExecuteEnabled] = useState(false);
   const [autoPilotNote, setAutoPilotNote] = useState<string | null>(null);
   const [executingInstrumentSymbol, setExecutingInstrumentSymbol] = useState<string | null>(null);
 
@@ -444,7 +430,7 @@ function TerminalWorkspace() {
     void syncOpenTradesLtp();
     const timer = window.setInterval(() => void syncOpenTradesLtp(), 4000);
     return () => window.clearInterval(timer);
-  }, [activeTab, selectedInstrumentId]);
+  }, [viewStage, activeTab, selectedInstrumentId]);
 
   const handleSignIn = async () => {
     setAuthError(null);
@@ -1111,30 +1097,18 @@ function TerminalWorkspace() {
     }
   }, [config, autoExecuteEnabled, executeSignalRecord]);
 
-  // Run initial 5-market auto-scan on load and every 20s when enabled across Dashboard & Terminal
+  const runAutoScanRef = useRef(runAutoScanAndExecute);
+  runAutoScanRef.current = runAutoScanAndExecute;
+
+  // Strictly manual / opt-in: NEVER runs or turns on unless user explicitly enables autoScanEnabled
   useEffect(() => {
-    if (viewStage !== 'workspace' || (activeTab !== 'dashboard' && activeTab !== 'terminal')) return;
-    void runAutoScanAndExecute();
-    if (!autoScanEnabled) return;
+    if (viewStage !== 'workspace' || !autoScanEnabled) return;
+    void runAutoScanRef.current();
     const timer = window.setInterval(() => {
-      void runAutoScanAndExecute();
+      void runAutoScanRef.current();
     }, 20_000);
     return () => window.clearInterval(timer);
-  }, [viewStage, activeTab, autoScanEnabled, runAutoScanAndExecute]);
-
-  const handleQuickCloseTrade = async (trade: TradeJournalEntry, exitPrice: number) => {
-    const diff =
-      trade.direction === 'BUY' ? exitPrice - trade.entryPrice : trade.entryPrice - exitPrice;
-    const pnl = Number((diff * trade.quantity).toFixed(2));
-    const result: 'WIN' | 'LOSS' | 'BREAKEVEN' =
-      pnl > 0 ? 'WIN' : pnl < 0 ? 'LOSS' : 'BREAKEVEN';
-
-    if (user) {
-      await closeTradeEntry(trade.id, { exitPrice, pnl, result });
-    } else {
-      setTrades(closeLocalTrade(trade.id, { exitPrice, pnl, result }));
-    }
-  };
+  }, [viewStage, autoScanEnabled]);
 
   if (viewStage === 'onboarding') {
     return (
@@ -1181,7 +1155,8 @@ function TerminalWorkspace() {
           setViewStage('workspace');
         }}
         onEnterPineBot={() => {
-          setActiveTab('pine-bot');
+          setAnalyzerSubTab('pine-bot');
+          setActiveTab('analyzer');
           setViewStage('workspace');
         }}
         justCompletedMode={justCompletedMode}
@@ -1217,7 +1192,7 @@ function TerminalWorkspace() {
 
         <nav className="hidden lg:flex items-center gap-5 text-xs font-medium text-slate-400">
           {NAV_ITEMS.filter((i) =>
-            ['dashboard', 'terminal', 'watchlist', 'pine-bot', 'account'].includes(i.id)
+            ['dashboard', 'terminal', 'analyzer', 'journal', 'account'].includes(i.id)
           ).map((item) => (
             <button
               key={item.id}
@@ -1301,82 +1276,41 @@ function TerminalWorkspace() {
             })}
           </div>
 
-          <div className="pt-4 border-t border-white/[0.08] space-y-2 text-[11px] text-slate-400">
-            <div className="font-semibold text-slate-200">Active Strategy Rules</div>
-            <div>
-              Trend: {config.trendTimeframe.toUpperCase()} · Entry:{' '}
-              {config.entryTimeframe.toUpperCase()}
-            </div>
-            <div>
-              EMAs: {config.emaFast} / {config.emaMid} / {config.emaSlow}
-            </div>
-            <div>
-              Min Score: {config.minSetupScore}/100 · R:R 1:{config.minRiskReward}
-            </div>
-            <div className={config.paperTradingOnly ? 'text-sky-300' : 'text-amber-300'}>
-              Mode: {config.paperTradingOnly ? 'Paper Trading' : 'Live + Paper'}
-            </div>
-            {accountProfile.accountMode === 'BROKER' ? (
-              <div className="text-sky-300 truncate">Broker: {config.brokerProviderLabel}</div>
-            ) : (
-              <div className="font-mono-tabular text-emerald-300">
-                Demo Wallet: {demoWallet.balance.toLocaleString()}
-              </div>
-            )}
-            <div className="text-slate-500">
-              Storage: {user ? 'Google Cloud Sync' : 'Standalone Local'}
-            </div>
-            <button
-              type="button"
-              onClick={() => setViewStage('landing')}
-              className="text-slate-300 hover:text-white underline underline-offset-4 block pt-1"
-            >
-              Return to Landing Page
-            </button>
-            {config.killSwitchActive && (
-              <div className="flex items-center gap-1.5 text-red-400 font-semibold">
-                <ShieldAlert className="w-3.5 h-3.5" />
-                Kill Switch Active
-              </div>
-            )}
-          </div>
         </aside>
 
         {/* Main Workspace Content */}
         <main className="flex-1 min-w-0 p-4 lg:p-6 max-w-[1440px]">
           {activeTab === 'dashboard' && (
             <DashboardView
-              config={config}
-              userEmail={user?.email || ''}
               wallet={demoWallet}
               trades={trades}
-              signals={signals}
               livePricesBySymbol={livePricesBySymbol}
               onOpenInTerminal={(id) => {
                 setSelectedInstrumentId(id);
                 setActiveTab('terminal');
               }}
-              onQuickAddWalletFunds={async (amt) => {
+              onDepositFunds={async (amt, note) => {
                 if (user) {
-                  await addDemoWalletFunds(user.uid, demoWallet, amt, 'Dashboard Quick Top-Up');
+                  await addDemoWalletFunds(user.uid, demoWallet, amt, note);
                 } else {
-                  setDemoWallet(addLocalDemoFunds(amt, 'Dashboard Quick Top-Up'));
+                  setDemoWallet(addLocalDemoFunds(amt, note));
                 }
               }}
-              onOpenBrokerModal={() => setBrokerModalOpen(true)}
-              onNavigateTab={(tab) => setActiveTab(tab)}
-              onQuickCloseTrade={handleQuickCloseTrade}
-              autoScanResults={autoScanResults}
-              autoScanLoading={autoScanLoading}
-              lastAutoScanAt={lastAutoScanAt}
-              autoScanEnabled={autoScanEnabled}
-              onToggleAutoScan={() => setAutoScanEnabled((v) => !v)}
-              autoExecuteEnabled={autoExecuteEnabled}
-              onToggleAutoExecute={() => setAutoExecuteEnabled((v) => !v)}
-              autoPilotNote={autoPilotNote}
-              onRunAutoScan={runAutoScanAndExecute}
-              onExecuteSignalInstant={handleExecuteSignalInstant}
-              executingInstrumentSymbol={executingInstrumentSymbol}
+              onWithdrawFunds={async (amt, note) => {
+                if (user) {
+                  await withdrawDemoWalletFunds(user.uid, demoWallet, amt, note);
+                } else {
+                  setDemoWallet(withdrawLocalDemoFunds(amt, note));
+                }
+              }}
+              onResetWallet={async (newBalance) => {
+                if (user) {
+                  await resetDemoWallet(user.uid, newBalance);
+                } else {
+                  setDemoWallet(resetLocalDemoWallet(newBalance));
+                }
+              }}
+              onNavigateJournal={() => setActiveTab('journal')}
             />
           )}
 
@@ -1417,38 +1351,40 @@ function TerminalWorkspace() {
             />
           )}
 
-          {activeTab === 'watchlist' && (
-            <WatchlistView
+          {activeTab === 'analyzer' && (
+            <AnalyzerHubView
+              activeSubTab={analyzerSubTab}
+              onSubTabChange={setAnalyzerSubTab}
               selectedInstrumentId={selectedInstrumentId}
-              onSelectInstrument={(id) => {
+              onSelectInstrumentForTerminal={(id) => {
                 setSelectedInstrumentId(id);
                 setActiveTab('terminal');
               }}
-            />
-          )}
-
-          {activeTab === 'chart-bot' && (
-            <ChartAnalysisBotView
               config={config}
+              trades={trades}
+              signals={signals}
+              orders={orders}
+              telegramLogs={telegramLogs}
+              chatMessages={chatMessages}
+              pineStrategies={pineStrategies}
+              pineBotLogs={pineBotLogs}
+              integrationStatus={integrationStatus}
+              autoScanResults={autoScanResults}
+              autoScanLoading={autoScanLoading}
+              lastAutoScanAt={lastAutoScanAt}
+              autoScanEnabled={autoScanEnabled}
+              onToggleAutoScan={() => setAutoScanEnabled((v) => !v)}
+              autoExecuteEnabled={autoExecuteEnabled}
+              onToggleAutoExecute={() => setAutoExecuteEnabled((v) => !v)}
+              autoPilotNote={autoPilotNote}
+              onRunAutoScan={runAutoScanAndExecute}
+              onExecuteSignalInstant={handleExecuteSignalInstant}
+              executingInstrumentSymbol={executingInstrumentSymbol}
               onSaveSignal={handleSaveSignal}
-              onSendTelegram={(sig) =>
-                handleDispatchTelegram({
-                  instrument: sig.instrument,
-                  eventType: 'SIGNAL',
-                  messageText: sig.telegramReadyText,
-                })
-              }
+              onDispatchTelegram={handleDispatchTelegram}
               onLogPaperTrade={handleLogPaperTrade}
               onOpenOrderModal={setOrderModalSignal}
-            />
-          )}
-
-          {activeTab === 'chatbot' && (
-            <ChatbotView
-              messages={chatMessages}
-              config={config}
-              selectedInstrumentId={selectedInstrumentId}
-              onInstrumentChange={setSelectedInstrumentId}
+              onUpdateInstrumentSelection={setSelectedInstrumentId}
               onSendUserMessage={async (content, ctx) => {
                 if (user) {
                   await addChatMessage(user.uid, 'user', content, ctx);
@@ -1463,11 +1399,50 @@ function TerminalWorkspace() {
                   setChatMessages(addLocalChatMessage('assistant', content, ctx));
                 }
               }}
-              onClearHistory={async () => {
+              onClearChatHistory={async () => {
                 if (user) {
                   await clearChatHistory(chatMessages);
                 } else {
                   setChatMessages(clearLocalChat());
+                }
+              }}
+              onSavePineStrategy={async (item) => {
+                if (user) {
+                  await createOrUpdatePineStrategy(user.uid, item);
+                } else {
+                  setPineStrategies(saveLocalPineStrategy(item));
+                }
+              }}
+              onDeletePineStrategy={async (strategyId) => {
+                if (user) {
+                  await deletePineStrategy(strategyId);
+                } else {
+                  setPineStrategies(deleteLocalPineStrategy(strategyId));
+                }
+              }}
+              onTogglePineBot={async (strategy) => {
+                const toggled = { ...strategy, botEnabled: !strategy.botEnabled };
+                if (user) {
+                  await createOrUpdatePineStrategy(user.uid, toggled);
+                } else {
+                  setPineStrategies(saveLocalPineStrategy(toggled));
+                }
+              }}
+              onCheckPineBotNow={evaluatePineBotStrategy}
+              onUpdateChannelLabel={async (label) => {
+                const { userId: _u, updatedAt: _t, ...rest } = config;
+                const next = { ...rest, telegramChannelLabel: label };
+                if (user) {
+                  await saveStrategyConfig(user.uid, next);
+                } else {
+                  setConfig(saveLocalConfig(next));
+                }
+              }}
+              onUpdateSignalStatus={async (id, status) => {
+                if (user) {
+                  await updateStoredSignalStatus(id, status);
+                } else {
+                  setSignals(updateLocalSignalStatus(id, status));
                 }
               }}
             />
@@ -1477,20 +1452,6 @@ function TerminalWorkspace() {
             <TradeJournalView
               trades={trades}
               wallet={demoWallet}
-              onAddDemoFunds={async (amount, note) => {
-                if (user) {
-                  await addDemoWalletFunds(user.uid, demoWallet, amount, note);
-                } else {
-                  setDemoWallet(addLocalDemoFunds(amount, note));
-                }
-              }}
-              onResetDemoWallet={async (newBalance) => {
-                if (user) {
-                  await resetDemoWallet(user.uid, newBalance);
-                } else {
-                  setDemoWallet(resetLocalDemoWallet(newBalance));
-                }
-              }}
               onCreateTrade={async (entry) => {
                 if (user) {
                   await createTradeEntry(user.uid, entry);
@@ -1515,36 +1476,6 @@ function TerminalWorkspace() {
             />
           )}
 
-          {activeTab === 'execution' && (
-            <ExecutionTelegramView
-              signals={signals}
-              orders={orders}
-              telegramLogs={telegramLogs}
-              config={config}
-              telegramConfigured={integrationStatus.telegramConfigured}
-              telegramChatConfigured={integrationStatus.telegramChatConfigured}
-              telegramBotUsername={integrationStatus.telegramBotUsername}
-              brokerConfigured={integrationStatus.brokerConfigured}
-              onUpdateChannelLabel={async (label) => {
-                const { userId: _u, updatedAt: _t, ...rest } = config;
-                const next = { ...rest, telegramChannelLabel: label };
-                if (user) {
-                  await saveStrategyConfig(user.uid, next);
-                } else {
-                  setConfig(saveLocalConfig(next));
-                }
-              }}
-              onUpdateSignalStatus={async (id, status) => {
-                if (user) {
-                  await updateStoredSignalStatus(id, status);
-                } else {
-                  setSignals(updateLocalSignalStatus(id, status));
-                }
-              }}
-              onDispatchTelegramText={handleDispatchTelegram}
-            />
-          )}
-
           {activeTab === 'settings' && (
             <AdminSettingsView
               config={config}
@@ -1557,37 +1488,6 @@ function TerminalWorkspace() {
                   setConfig(saveLocalConfig(next));
                 }
               }}
-            />
-          )}
-
-          {activeTab === 'pine-bot' && (
-            <PineStrategyBotView
-              strategies={pineStrategies}
-              onSaveStrategy={async (item) => {
-                if (user) {
-                  await createOrUpdatePineStrategy(user.uid, item);
-                } else {
-                  setPineStrategies(saveLocalPineStrategy(item));
-                }
-              }}
-              onDeleteStrategy={async (strategyId) => {
-                if (user) {
-                  await deletePineStrategy(strategyId);
-                } else {
-                  setPineStrategies(deleteLocalPineStrategy(strategyId));
-                }
-              }}
-              onToggleBot={async (strategy) => {
-                const toggled = { ...strategy, botEnabled: !strategy.botEnabled };
-                if (user) {
-                  await createOrUpdatePineStrategy(user.uid, toggled);
-                } else {
-                  setPineStrategies(saveLocalPineStrategy(toggled));
-                }
-              }}
-              onCheckLiveBotNow={evaluatePineBotStrategy}
-              botLogs={pineBotLogs}
-              killSwitchActive={config.killSwitchActive}
             />
           )}
 

@@ -128,6 +128,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const hasFitRef = useRef<boolean>(false);
   const lastStructureKeyRef = useRef<string>('');
   const lastLevelsKeyRef = useRef<string>('');
+  const lastRestBarHashRef = useRef<string>('');
+  const lastPlottedTimeRef = useRef<number>(0);
+  const lastIndicatorTimeRef = useRef<number>(0);
   const latestBarRef = useRef<{
     time: number;
     open: number;
@@ -152,8 +155,24 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const uniqueCandles = useMemo(() => {
     if (!quote?.candles?.length) return [];
     const seen = new Set<number>();
+    const normalized: CandleBar[] = [];
+    for (const c of quote.candles) {
+      const t = Math.floor(Number(c.time));
+      if (
+        !Number.isFinite(t) ||
+        t <= 0 ||
+        !Number.isFinite(c.open) ||
+        !Number.isFinite(c.high) ||
+        !Number.isFinite(c.low) ||
+        !Number.isFinite(c.close)
+      ) {
+        continue;
+      }
+      normalized.push({ ...c, time: t });
+    }
+    normalized.sort((a, b) => a.time - b.time);
     const out: CandleBar[] = [];
-    for (const c of [...quote.candles].sort((a, b) => a.time - b.time)) {
+    for (const c of normalized) {
       if (!seen.has(c.time)) {
         seen.add(c.time);
         out.push(c);
@@ -169,6 +188,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     hasFitRef.current = false;
     lastStructureKeyRef.current = '';
     lastLevelsKeyRef.current = '';
+    lastRestBarHashRef.current = '';
+    lastPlottedTimeRef.current = 0;
+    lastIndicatorTimeRef.current = 0;
     latestBarRef.current = null;
     pendingTickRef.current = null;
   }, [instrument.id, timeframe, chartMode]);
@@ -274,6 +296,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       chartRef.current = null;
       lastStructureKeyRef.current = '';
       lastLevelsKeyRef.current = '';
+      lastRestBarHashRef.current = '';
+      lastPlottedTimeRef.current = 0;
+      lastIndicatorTimeRef.current = 0;
       chart.remove();
     };
   }, [
@@ -301,45 +326,100 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     }
 
     const candleSeries = candleSeriesRef.current;
-    const lastBar = uniqueCandles[uniqueCandles.length - 1];
-    latestBarRef.current = {
-      time: lastBar.time,
-      open: lastBar.open,
-      high: lastBar.high,
-      low: lastBar.low,
-      close: lastBar.close,
-    };
+    const rawLastBar = uniqueCandles[uniqueCandles.length - 1];
+
+    // Preserve any newer live WebSocket bar so a slower REST poll never rolls time backwards
+    const existingLiveBar = latestBarRef.current;
+    let effectiveCandles = uniqueCandles;
+    if (existingLiveBar && existingLiveBar.time > rawLastBar.time) {
+      effectiveCandles = [
+        ...uniqueCandles,
+        {
+          time: existingLiveBar.time,
+          open: existingLiveBar.open,
+          high: existingLiveBar.high,
+          low: existingLiveBar.low,
+          close: existingLiveBar.close,
+          volume: rawLastBar.volume,
+        },
+      ];
+    } else if (existingLiveBar && existingLiveBar.time === rawLastBar.time) {
+      effectiveCandles = [
+        ...uniqueCandles.slice(0, -1),
+        {
+          ...rawLastBar,
+          high: Math.max(rawLastBar.high, existingLiveBar.high),
+          low: Math.min(rawLastBar.low, existingLiveBar.low),
+          close: existingLiveBar.close,
+        },
+      ];
+    }
+
+    const effectiveLastBar = effectiveCandles[effectiveCandles.length - 1];
+    if (
+      !existingLiveBar ||
+      effectiveLastBar.time >= existingLiveBar.time
+    ) {
+      latestBarRef.current = {
+        time: effectiveLastBar.time,
+        open: effectiveLastBar.open,
+        high: effectiveLastBar.high,
+        low: effectiveLastBar.low,
+        close: effectiveLastBar.close,
+      };
+    }
+
     if (liveHeaderPriceRef.current && quote.price !== undefined) {
       liveHeaderPriceRef.current.textContent = `${instrument.currency}${quote.price.toLocaleString()}`;
     }
-    const structureKey = `${chartMode}:${instrument.id}:${timeframe}:${showEmas}:${showVwap}:${config.emaFast}:${config.emaMid}:${config.emaSlow}:${uniqueCandles.length}:${uniqueCandles[0].time}:${lastBar.time}`;
+
+    const structureKey = `${chartMode}:${instrument.id}:${timeframe}:${showEmas}:${showVwap}:${config.emaFast}:${config.emaMid}:${config.emaSlow}:${effectiveCandles.length}:${effectiveCandles[0].time}:${effectiveLastBar.time}`;
+    const restBarHash = `${rawLastBar.time}:${rawLastBar.open}:${rawLastBar.high}:${rawLastBar.low}:${rawLastBar.close}`;
 
     if (lastStructureKeyRef.current === structureKey) {
-      // O(1) single-bar update on live tick — zero layout thrash
-      candleSeries.update({
-        time: lastBar.time as UTCTimestamp,
-        open: lastBar.open,
-        high: lastBar.high,
-        low: lastBar.low,
-        close: lastBar.close,
-      });
+      // Only push incremental updates if REST candles actually changed AND never regress lastPlottedTimeRef
+      if (
+        lastRestBarHashRef.current !== restBarHash &&
+        effectiveLastBar.time >= lastPlottedTimeRef.current
+      ) {
+        try {
+          candleSeries.update({
+            time: effectiveLastBar.time as UTCTimestamp,
+            open: effectiveLastBar.open,
+            high: effectiveLastBar.high,
+            low: effectiveLastBar.low,
+            close: effectiveLastBar.close,
+          });
+          lastPlottedTimeRef.current = effectiveLastBar.time;
+        } catch {
+          // Ignore out-of-order tick edge case safely
+        }
 
-      if (showEmas) {
-        const fastPts = calcEmaPoints(uniqueCandles, config.emaFast);
-        const midPts = calcEmaPoints(uniqueCandles, config.emaMid);
-        const slowPts = calcEmaPoints(uniqueCandles, config.emaSlow);
-        if (fastPts.length) emaFastRef.current?.update(fastPts[fastPts.length - 1]);
-        if (midPts.length) emaMidRef.current?.update(midPts[midPts.length - 1]);
-        if (slowPts.length) emaSlowRef.current?.update(slowPts[slowPts.length - 1]);
-      }
+        if (effectiveLastBar.time >= lastIndicatorTimeRef.current) {
+          try {
+            if (showEmas) {
+              const fastPts = calcEmaPoints(effectiveCandles, config.emaFast);
+              const midPts = calcEmaPoints(effectiveCandles, config.emaMid);
+              const slowPts = calcEmaPoints(effectiveCandles, config.emaSlow);
+              if (fastPts.length) emaFastRef.current?.update(fastPts[fastPts.length - 1]);
+              if (midPts.length) emaMidRef.current?.update(midPts[midPts.length - 1]);
+              if (slowPts.length) emaSlowRef.current?.update(slowPts[slowPts.length - 1]);
+            }
 
-      if (showVwap) {
-        const vwapPts = calcVwapPoints(uniqueCandles);
-        if (vwapPts.length) vwapSeriesRef.current?.update(vwapPts[vwapPts.length - 1]);
+            if (showVwap) {
+              const vwapPts = calcVwapPoints(effectiveCandles);
+              if (vwapPts.length) vwapSeriesRef.current?.update(vwapPts[vwapPts.length - 1]);
+            }
+            lastIndicatorTimeRef.current = effectiveLastBar.time;
+          } catch {
+            // Ignore indicator ordering edge case safely
+          }
+        }
+        lastRestBarHashRef.current = restBarHash;
       }
     } else {
       candleSeries.setData(
-        uniqueCandles.map((c) => ({
+        effectiveCandles.map((c) => ({
           time: c.time as UTCTimestamp,
           open: c.open,
           high: c.high,
@@ -349,19 +429,22 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       );
 
       if (showEmas) {
-        emaFastRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaFast));
-        emaMidRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaMid));
-        emaSlowRef.current?.setData(calcEmaPoints(uniqueCandles, config.emaSlow));
+        emaFastRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaFast));
+        emaMidRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaMid));
+        emaSlowRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaSlow));
       }
 
       if (showVwap) {
-        vwapSeriesRef.current?.setData(calcVwapPoints(uniqueCandles));
+        vwapSeriesRef.current?.setData(calcVwapPoints(effectiveCandles));
       }
 
+      lastPlottedTimeRef.current = effectiveLastBar.time;
+      lastIndicatorTimeRef.current = effectiveLastBar.time;
+      lastRestBarHashRef.current = restBarHash;
       lastStructureKeyRef.current = structureKey;
     }
 
-    const levelsKey = `${showLevels}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${lastBar.time}`;
+    const levelsKey = `${showLevels}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${effectiveLastBar.time}`;
 
     if (lastLevelsKeyRef.current !== levelsKey) {
       for (const line of priceLinesRef.current) {
@@ -450,7 +533,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         }
 
         markers.push({
-          time: lastBar.time as UTCTimestamp,
+          time: effectiveLastBar.time as UTCTimestamp,
           position: activeSignal.direction === 'BUY' ? 'belowBar' : 'aboveBar',
           color: activeSignal.direction === 'BUY' ? '#10B981' : '#EF4444',
           shape: activeSignal.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
@@ -560,9 +643,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       pendingTickRef.current = null;
 
       const tickBucket = Math.floor(tick.ts / 1000 / tfSec) * tfSec;
+      if (!Number.isFinite(tickBucket) || tickBucket <= 0) return;
+
       const curBar = latestBarRef.current;
+      const anchorTime = Math.max(curBar.time, lastPlottedTimeRef.current);
       const nextBar =
-        tickBucket > curBar.time
+        tickBucket > anchorTime
           ? {
               time: tickBucket,
               open: tick.price,
@@ -571,7 +657,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               close: tick.price,
             }
           : {
-              time: curBar.time,
+              time: anchorTime,
               open: curBar.open,
               high: Math.max(curBar.high, tick.price),
               low: Math.min(curBar.low, tick.price),
@@ -579,13 +665,18 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             };
 
       latestBarRef.current = nextBar;
-      candleSeriesRef.current.update({
-        time: nextBar.time as UTCTimestamp,
-        open: nextBar.open,
-        high: nextBar.high,
-        low: nextBar.low,
-        close: nextBar.close,
-      });
+      try {
+        candleSeriesRef.current.update({
+          time: nextBar.time as UTCTimestamp,
+          open: nextBar.open,
+          high: nextBar.high,
+          low: nextBar.low,
+          close: nextBar.close,
+        });
+        lastPlottedTimeRef.current = nextBar.time;
+      } catch {
+        // Guard async interval from throwing on out-of-order ticks
+      }
 
       if (liveHeaderPriceRef.current) {
         liveHeaderPriceRef.current.textContent = `${instrument.currency}${tick.price.toLocaleString()}`;

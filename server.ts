@@ -754,11 +754,29 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
+  const httpServer = http.createServer(app);
+
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
+    });
+    app.get('/@vite/client', async (_req: Request, res: Response, next) => {
+      try {
+        const result = await vite.transformRequest('/@vite/client');
+        if (!result?.code) {
+          next();
+          return;
+        }
+        const safeCode = result.code.replace(
+          'transport.connect(createHMRHandler(handleMessage));',
+          '/* Vite HMR WebSocket disabled in AI Studio runtime */'
+        );
+        res.type('application/javascript').send(safeCode);
+      } catch {
+        next();
+      }
     });
     app.use(vite.middlewares);
   } else {
@@ -774,7 +792,6 @@ async function startServer() {
     });
   }
 
-  const httpServer = http.createServer(app);
   attachBinanceWsHub(httpServer);
 
   httpServer.listen(PORT, '0.0.0.0', () => {

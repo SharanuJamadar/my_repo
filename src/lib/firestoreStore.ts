@@ -520,7 +520,7 @@ export async function addDemoWalletFunds(
   const safeAmount = Number.isFinite(amount) && amount > 0 ? Number(amount.toFixed(2)) : 0;
   if (safeAmount <= 0) return;
   const entry = clampString(
-    `${new Date().toLocaleString()} | +${safeAmount.toLocaleString()} | ${(note || 'Demo Top-Up').trim()}`,
+    `${new Date().toLocaleString()} | +${safeAmount.toLocaleString()} | ${(note || 'Deposit').trim()}`,
     120
   );
   const ref = doc(db, 'demoWallets', userId);
@@ -529,6 +529,39 @@ export async function addDemoWalletFunds(
       userId,
       balance: Number((current.balance + safeAmount).toFixed(2)),
       totalAdded: Number((current.totalAdded + safeAmount).toFixed(2)),
+      recentDeposits: [entry, ...(current.recentDeposits || [])].slice(0, 20),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `demoWallets/${userId}`);
+  }
+}
+
+export async function withdrawDemoWalletFunds(
+  userId: string,
+  current: DemoWalletState,
+  amount: number,
+  note?: string
+): Promise<void> {
+  const safeAmount = Number.isFinite(amount) && amount > 0 ? Number(amount.toFixed(2)) : 0;
+  if (safeAmount <= 0) {
+    throw new Error('Enter a valid withdrawal amount greater than 0.');
+  }
+  if (safeAmount > current.balance) {
+    throw new Error(
+      `Insufficient wallet balance. Available: ${current.balance.toLocaleString()}`
+    );
+  }
+  const entry = clampString(
+    `${new Date().toLocaleString()} | -${safeAmount.toLocaleString()} | ${(note || 'Withdrawal').trim()}`,
+    120
+  );
+  const ref = doc(db, 'demoWallets', userId);
+  try {
+    await setDoc(ref, {
+      userId,
+      balance: Number(Math.max(0, current.balance - safeAmount).toFixed(2)),
+      totalAdded: current.totalAdded,
       recentDeposits: [entry, ...(current.recentDeposits || [])].slice(0, 20),
       updatedAt: serverTimestamp(),
     });
