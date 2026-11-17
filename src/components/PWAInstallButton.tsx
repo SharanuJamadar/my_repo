@@ -80,7 +80,7 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
         className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-[#161A22] hover:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200 transition-colors whitespace-nowrap shrink-0"
       >
         <Smartphone className="w-3.5 h-3.5 text-[#C9A24D] shrink-0" />
-        <span>Mobile App &amp; Play Store</span>
+        <span>App Download (APK)</span>
       </button>
     );
   }

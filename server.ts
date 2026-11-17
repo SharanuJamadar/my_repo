@@ -24,8 +24,8 @@ import {
   analyzeUploadedChartWithGemini,
   chatWithTradingAssistant,
   enhanceLiveAnalysisWithGemini,
-  fetchLiveMarketNewsWithGemini,
 } from './server/geminiService.ts';
+import { fetchFreeLiveMarketNews } from './server/newsService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -119,17 +119,26 @@ app.get('/.well-known/assetlinks.json', (req: Request, res: Response) => {
   ]);
 });
 
+app.get('/MyTrade.apk', (_req: Request, res: Response) => {
+  const candidates = [
+    path.resolve(__dirname, 'public', 'MyTrade.apk'),
+    path.resolve(__dirname, 'dist', 'MyTrade.apk'),
+  ];
+  const apkPath = candidates.find((p) => fs.existsSync(p));
+  if (!apkPath) {
+    res.status(404).json({ error: 'MyTrade.apk package not found on server.' });
+    return;
+  }
+  res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+  res.setHeader('Content-Disposition', 'attachment; filename="MyTrade.apk"');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.sendFile(apkPath);
+});
+
 const liveNewsCache = new Map<string, { expiresAt: number; payload: LiveMarketNewsResponse }>();
 
 app.get('/api/news/live', async (req: Request, res: Response) => {
   try {
-    if (!process.env.GEMINI_API_KEY) {
-      res.status(503).json({
-        error: 'GEMINI_API_KEY is not configured in server environment secrets.',
-      });
-      return;
-    }
-
     const rawCat = String(req.query.category || 'ALL').toUpperCase();
     const category: MarketNewsCategory = ['ALL', 'INDIAN', 'MCX', 'INTERNATIONAL'].includes(rawCat)
       ? (rawCat as MarketNewsCategory)
@@ -144,33 +153,15 @@ app.get('/api/news/live', async (req: Request, res: Response) => {
       return;
     }
 
-    const news = await fetchLiveMarketNewsWithGemini({ category, query });
+    const news = await fetchFreeLiveMarketNews({ category, query });
     liveNewsCache.set(cacheKey, {
-      expiresAt: Date.now() + 120_000, // 2-minute cache
+      expiresAt: Date.now() + 90_000, // 90-second cache for free feeds
       payload: news,
     });
     res.json({ ...news, cached: false });
   } catch (err: any) {
-    const rawMsg = err instanceof Error ? err.message : 'Failed to fetch live market news.';
-    let cleanMsg = rawMsg;
-    let statusCode = typeof err?.status === 'number' ? err.status : 500;
-    try {
-      const parsed = JSON.parse(rawMsg);
-      if (parsed?.error?.message) {
-        cleanMsg = parsed.error.message;
-      }
-      if (typeof parsed?.error?.code === 'number') {
-        statusCode = parsed.error.code;
-      }
-    } catch {
-      // Keep original message if not JSON
-    }
-    if (statusCode === 429) {
-      cleanMsg =
-        'Gemini API quota limit reached for live Google Search news. Please verify or upgrade your API key quota in Settings > Secrets, then click Retry.';
-    }
-    res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
-      error: cleanMsg,
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to fetch live market news feeds.',
     });
   }
 });
@@ -266,7 +257,13 @@ app.get('/api/integrations/status', async (_req: Request, res: Response) => {
     telegramBotUsername: botUsername,
     twelveDataConfigured: Boolean(process.env.TWELVE_DATA_API_KEY),
     brokerConfigured: hasAnyLiveBrokerConfigured(),
-    publicFeedsActive: ['Binance Live Spot API', 'Bybit Live Spot API', 'Yahoo Live Feed', 'Swissquote Spot'],
+    publicFeedsActive: [
+      'Binance Live Spot API',
+      'Bybit Live Spot API',
+      'Yahoo Live Feed',
+      'Yahoo News & Market RSS',
+      'Swissquote Spot',
+    ],
   });
 });
 

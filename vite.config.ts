@@ -50,7 +50,7 @@ export default defineConfig(() => {
         workbox: {
           maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
           globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-          navigateFallbackDenylist: [/^\/api\//, /^\/ws\//, /^\/\.well-known\//],
+          navigateFallbackDenylist: [/^\/api\//, /^\/ws\//, /^\/\.well-known\//, /\.apk$/i],
           runtimeCaching: [
             {
               urlPattern: /^\/api\/.*/i,

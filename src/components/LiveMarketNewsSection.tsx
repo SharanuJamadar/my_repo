@@ -38,9 +38,19 @@ function resolveInstrumentId(assetLabel: string): string | null {
   if (clean.includes('SENSEX')) return 'SENSEX';
   if (clean.includes('GOLD') || clean === 'XAU') return 'XAUUSD';
   if (clean.includes('SILVER') || clean === 'XAG') return 'XAGUSD';
-  if (clean.includes('CRUDE') || clean === 'WTI' || clean === 'OIL') return 'CRUDEOIL';
+  if (clean.includes('CRUDE') || clean === 'WTI' || clean === 'BRENT' || clean === 'OIL') return 'MCX_CRUDEOIL';
+  if (clean.includes('NATURALGAS') || clean === 'NATGAS') return 'MCX_NATURALGAS';
+  if (clean.includes('COPPER')) return 'MCX_COPPER';
+  if (clean.includes('NASDAQ') || clean === 'US100' || clean === 'NAS100') return 'NAS100';
+  if (clean.includes('SP500') || clean === 'US500' || clean === 'SPX500') return 'SPX500';
+  if (clean.includes('DOW') || clean === 'US30') return 'US30';
+  if (clean === 'EURUSD') return 'EURUSD';
+  if (clean === 'GBPUSD') return 'GBPUSD';
+  if (clean === 'USDJPY') return 'USDJPY';
   if (clean === 'BTC' || clean === 'BITCOIN') return 'BTCUSDT';
   if (clean === 'ETH' || clean === 'ETHEREUM') return 'ETHUSDT';
+  if (clean === 'SOL' || clean === 'SOLANA') return 'SOLUSDT';
+  if (clean === 'XRP' || clean === 'RIPPLE') return 'XRPUSDT';
   return null;
 }
 
@@ -112,7 +122,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
               Live Market News
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Real-time breaking catalysts affecting indices, gold, crude oil, and global markets via Google Search
+              Real-time breaking catalysts from Yahoo Finance, Google News, Economic Times, CNBC & CoinDesk
             </p>
           </div>
         </div>
@@ -218,7 +228,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
               onClick={() => void loadLiveNews({ forceRefresh: true })}
               className="px-4 py-2 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-white rounded-lg transition-colors"
             >
-              Retry Live Search
+              Retry Live Feeds
             </button>
           </div>
         </div>
@@ -320,7 +330,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
       {newsData && newsData.groundingSources.length > 0 && (
         <div className="px-6 py-3.5 border-t border-white/[0.06] bg-[#0C0F14]/60 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
           <span className="text-slate-500 font-medium whitespace-nowrap">
-            Verified Google Search Sources:
+            Active Free News Feeds:
           </span>
           {newsData.groundingSources.slice(0, 6).map((src, idx) => (
             <a

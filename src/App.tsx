@@ -127,7 +127,7 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ classN
   { id: 'journal', label: 'Trade Journal', icon: BookOpen },
   { id: 'account', label: 'Account Settings', icon: UserCog },
   { id: 'settings', label: 'Admin Settings', icon: Settings },
-  { id: 'mobile', label: 'Mobile & Play Store', icon: Smartphone },
+  { id: 'mobile', label: 'App Download', icon: Smartphone },
 ];
 
 function TerminalWorkspace() {
