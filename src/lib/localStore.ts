@@ -9,6 +9,7 @@ import {
   type ExecutionOrderRecord,
   type GeneratedSignalPayload,
   type PineStrategyRecord,
+  type PriceAlertRule,
   type SignalStatus,
   type StoredTradeSignal,
   type StrategyConfig,
@@ -28,6 +29,7 @@ const KEYS = {
   account: 'sharan_account_profile_v1',
   pineStrategies: 'sharan_pine_strategies_v1',
   customWatchlist: 'sharan_custom_watchlist_v1',
+  priceAlerts: 'sharan_price_alerts_v1',
 };
 
 function readJson<T>(key: string, fallback: T): T {
@@ -65,9 +67,15 @@ export function loadLocalConfig(): StrategyConfig {
       : savedIds.length > 0
         ? savedIds
         : allIds;
+  const upgradedSaved = saved ? { ...saved } : {};
+  if (upgradedSaved.minSetupScore === 70 && upgradedSaved.minRiskReward === 1.8) {
+    upgradedSaved.minSetupScore = DEFAULT_STRATEGY_CONFIG.minSetupScore;
+    upgradedSaved.minRiskReward = DEFAULT_STRATEGY_CONFIG.minRiskReward;
+    upgradedSaved.maxRiskPerTradePct = DEFAULT_STRATEGY_CONFIG.maxRiskPerTradePct;
+  }
   return {
     ...DEFAULT_STRATEGY_CONFIG,
-    ...(saved || {}),
+    ...upgradedSaved,
     activeInstruments: mergedInstruments,
     userId: 'local-standalone',
   };
@@ -181,6 +189,9 @@ export function closeLocalTrade(
     pnl: number;
     result: 'WIN' | 'LOSS' | 'BREAKEVEN';
     screenshotNote?: string;
+    remainingQuantity?: number;
+    partialRealizedPnl?: number;
+    auditTrail?: string[];
   }
 ): TradeJournalEntry[] {
   const now = new Date().toISOString();
@@ -192,7 +203,38 @@ export function closeLocalTrade(
           result: params.result,
           pnl: params.pnl,
           status: 'CLOSED' as const,
+          ...(params.remainingQuantity !== undefined ? { remainingQuantity: params.remainingQuantity } : {}),
+          ...(params.partialRealizedPnl !== undefined ? { partialRealizedPnl: params.partialRealizedPnl } : {}),
           ...(params.screenshotNote ? { screenshotNote: params.screenshotNote } : {}),
+          ...(params.auditTrail ? { auditTrail: params.auditTrail.slice(0, 20) } : {}),
+          updatedAt: now,
+        }
+      : t
+  );
+  writeJson(KEYS.trades, updated);
+  return updated;
+}
+
+export function updateLocalTradeTrailingStop(
+  tradeId: string,
+  params: {
+    stopLoss: number;
+    tpStage: 0 | 1 | 2;
+    remainingQuantity?: number;
+    partialRealizedPnl?: number;
+    auditTrail?: string[];
+  }
+): TradeJournalEntry[] {
+  const now = new Date().toISOString();
+  const updated: TradeJournalEntry[] = loadLocalTrades().map((t) =>
+    t.id === tradeId && t.status === 'OPEN'
+      ? {
+          ...t,
+          stopLoss: params.stopLoss,
+          tpStage: params.tpStage,
+          ...(params.remainingQuantity !== undefined ? { remainingQuantity: params.remainingQuantity } : {}),
+          ...(params.partialRealizedPnl !== undefined ? { partialRealizedPnl: params.partialRealizedPnl } : {}),
+          ...(params.auditTrail ? { auditTrail: params.auditTrail.slice(0, 20) } : {}),
           updatedAt: now,
         }
       : t
@@ -379,28 +421,69 @@ export function saveLocalAccountProfile(next: AccountProfileSettings): AccountPr
 
 export function loadLocalPineStrategies(): PineStrategyRecord[] {
   const saved = readJson<PineStrategyRecord[] | null>(KEYS.pineStrategies, null);
-  if (saved && Array.isArray(saved) && saved.length > 0) {
-    return saved;
-  }
   const now = new Date().toISOString();
-  const seeded: PineStrategyRecord[] = PINE_STRATEGY_TEMPLATES.map((tpl, idx) => ({
-    id: `pine-tpl-${idx + 1}`,
-    userId: 'local-standalone',
-    name: tpl.name,
-    description: tpl.description,
-    instrumentId: tpl.instrumentId,
-    timeframe: tpl.timeframe,
-    pineCode: tpl.pineCode,
-    quantity: tpl.quantity,
-    initialCapital: 100_000,
-    stopLossPct: tpl.stopLossPct,
-    takeProfitPct: tpl.takeProfitPct,
-    executionMode: 'PAPER',
-    botEnabled: false,
-    autoExecute: true,
-    createdAt: now,
-    updatedAt: now,
-  }));
+  const buildSeeded = (): PineStrategyRecord[] =>
+    PINE_STRATEGY_TEMPLATES.map((tpl, idx) => ({
+      id: `pine-tpl-${idx + 1}`,
+      userId: 'local-standalone',
+      name: tpl.name,
+      description: tpl.description,
+      instrumentId: tpl.instrumentId,
+      timeframe: tpl.timeframe,
+      pineCode: tpl.pineCode,
+      quantity: tpl.quantity,
+      initialCapital: 100_000,
+      stopLossPct: tpl.stopLossPct,
+      takeProfitPct: tpl.takeProfitPct,
+      riskPerTradePct: tpl.riskPerTradePct,
+      trailingStop: tpl.trailingStop,
+      executionMode: 'PAPER',
+      botEnabled: false,
+      autoExecute: true,
+      createdAt: now,
+      updatedAt: now,
+    }));
+
+  if (saved && Array.isArray(saved) && saved.length > 0) {
+    const legacyNames = new Set([
+      'My Trade EMA 9/20 Crossover + VWAP + RSI',
+      'SHARAN EMA 9/20 Crossover + VWAP + RSI',
+      'Crude Oil / Gold EMA 9 Price Breakout',
+      'Crypto / Index MACD + EMA 50 Trend Bot',
+    ]);
+    let changed = false;
+    const upgraded = saved.map((s) => {
+      const tplMatch = s.id.match(/^pine-tpl-(\d+)$/);
+      if (tplMatch && legacyNames.has(s.name)) {
+        const idx = Number(tplMatch[1]) - 1;
+        const tpl = PINE_STRATEGY_TEMPLATES[idx];
+        if (tpl) {
+          changed = true;
+          return {
+            ...s,
+            name: tpl.name,
+            description: tpl.description,
+            instrumentId: tpl.instrumentId,
+            timeframe: tpl.timeframe,
+            pineCode: tpl.pineCode,
+            quantity: tpl.quantity,
+            stopLossPct: tpl.stopLossPct,
+            takeProfitPct: tpl.takeProfitPct,
+            riskPerTradePct: tpl.riskPerTradePct,
+            trailingStop: tpl.trailingStop,
+            updatedAt: now,
+          };
+        }
+      }
+      return s;
+    });
+    if (changed) {
+      writeJson(KEYS.pineStrategies, upgraded);
+    }
+    return upgraded;
+  }
+
+  const seeded = buildSeeded();
   writeJson(KEYS.pineStrategies, seeded);
   return seeded;
 }
@@ -459,5 +542,21 @@ export function saveLocalCustomWatchlist(ids: string[]): string[] {
   writeJson(KEYS.customWatchlist, clean);
   return clean;
 }
+
+export function loadLocalPriceAlerts(): PriceAlertRule[] {
+  const saved = readJson<unknown>(KEYS.priceAlerts, []);
+  if (!Array.isArray(saved)) return [];
+  return saved.filter(
+    (a): a is PriceAlertRule =>
+      Boolean(a && typeof a === 'object' && typeof (a as PriceAlertRule).id === 'string' && Number.isFinite(Number((a as PriceAlertRule).targetPrice)))
+  ).slice(0, 50);
+}
+
+export function saveLocalPriceAlerts(alerts: PriceAlertRule[]): PriceAlertRule[] {
+  const clean = alerts.slice(0, 50);
+  writeJson(KEYS.priceAlerts, clean);
+  return clean;
+}
+
 
 

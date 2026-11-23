@@ -20,6 +20,7 @@ import {
   AlertCircle,
   ArrowRightToLine,
   BarChart3,
+  Bell,
   CandlestickChart,
   Crosshair,
   ExternalLink,
@@ -45,7 +46,10 @@ import type {
   MarketQuoteResponse,
   StrategyConfig,
   Timeframe,
+  TradeJournalEntry,
+  TradeTrailState,
 } from '../types/trading';
+import { useTheme } from '../lib/theme';
 
 interface TradingChartProps {
   instrument: InstrumentMeta;
@@ -58,7 +62,12 @@ interface TradingChartProps {
   onToggleLiveStreaming: () => void;
   config: StrategyConfig;
   activeSignal?: GeneratedSignalPayload | null;
+  openTrades?: TradeJournalEntry[];
+  tradeProtectionMap?: Record<string, TradeTrailState>;
   onLivePriceTick?: (instrumentId: string, price: number) => void;
+  onQuickOrder?: (side: 'BUY' | 'SELL', quantity: number) => Promise<void> | void;
+  onQuickPriceAlert?: (price: number) => void;
+  compact?: boolean;
 }
 
 type ChartMode = 'MY_TRADE_LIVE' | 'TRADING_VIEW';
@@ -178,8 +187,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   onToggleLiveStreaming,
   config,
   activeSignal,
+  openTrades,
+  tradeProtectionMap,
   onLivePriceTick,
+  onQuickOrder,
+  onQuickPriceAlert,
+  compact = false,
 }) => {
+  const { isDark } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const mainSeriesRef = useRef<ISeriesApi<'Candlestick'> | ISeriesApi<'Area'> | null>(null);
@@ -228,9 +243,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const [previewPoint, setPreviewPoint] = useState<LogicalPoint | null>(null);
   const [renderTick, setRenderTick] = useState(0);
   const [hoveredStats, setHoveredStats] = useState<HoveredBarStats | null>(null);
+  const [quickQty, setQuickQty] = useState<string>('1');
+  const [quickOrdering, setQuickOrdering] = useState<'BUY' | 'SELL' | null>(null);
+  const loadedDrawingsKeyRef = useRef<string>('');
 
   const supportsBinanceWs = Boolean(instrument.binanceSymbol || instrument.binanceFuturesSymbol);
-  const chartHeight = isExpanded ? 580 : 450;
+  const chartHeight = isExpanded ? 580 : compact ? 380 : 450;
 
   const uniqueCandles = useMemo(() => {
     if (!quote?.candles?.length) return [];
@@ -310,11 +328,44 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     setHoveredStats(null);
   }, [instrument.id, timeframe, chartMode]);
 
+  // Load persisted drawings for the active instrument from localStorage
   useEffect(() => {
-    setDrawings([]);
+    const storageKey = `mytrade_chart_drawings_${instrument.id}`;
+    loadedDrawingsKeyRef.current = '';
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          setDrawings(parsed.slice(0, 40));
+        } else {
+          setDrawings([]);
+        }
+      } else {
+        setDrawings([]);
+      }
+    } catch {
+      setDrawings([]);
+    }
+    loadedDrawingsKeyRef.current = storageKey;
     setPendingPoint(null);
     setPreviewPoint(null);
   }, [instrument.id]);
+
+  // Persist drawings to localStorage whenever they change for the loaded instrument
+  useEffect(() => {
+    const storageKey = `mytrade_chart_drawings_${instrument.id}`;
+    if (loadedDrawingsKeyRef.current !== storageKey) return;
+    try {
+      if (drawings.length === 0) {
+        window.localStorage.removeItem(storageKey);
+      } else {
+        window.localStorage.setItem(storageKey, JSON.stringify(drawings.slice(0, 40)));
+      }
+    } catch {
+      // Ignore storage quota issues
+    }
+  }, [drawings, instrument.id]);
 
   // Zoom & Viewport Controls
   const handleZoomIn = useCallback(() => {
@@ -370,28 +421,34 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       width: el.clientWidth,
       height: chartHeight,
       layout: {
-        background: { type: ColorType.Solid, color: '#0C0F14' },
-        textColor: '#94A3B8',
+        background: { type: ColorType.Solid, color: isDark ? '#0B1424' : '#FFFFFF' },
+        textColor: isDark ? '#94A3B8' : '#475569',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
+        vertLines: { color: isDark ? 'rgba(148,163,184,0.08)' : '#F1F5F9' },
+        horzLines: { color: isDark ? 'rgba(148,163,184,0.08)' : '#F1F5F9' },
       },
       crosshair: {
-        vertLine: { color: 'rgba(201, 162, 77, 0.45)', labelBackgroundColor: '#1E293B' },
-        horzLine: { color: 'rgba(201, 162, 77, 0.45)', labelBackgroundColor: '#1E293B' },
+        vertLine: {
+          color: isDark ? 'rgba(56, 189, 248, 0.45)' : 'rgba(29, 78, 216, 0.35)',
+          labelBackgroundColor: isDark ? '#1E293B' : '#0F172A',
+        },
+        horzLine: {
+          color: isDark ? 'rgba(56, 189, 248, 0.45)' : 'rgba(29, 78, 216, 0.35)',
+          labelBackgroundColor: isDark ? '#1E293B' : '#0F172A',
+        },
       },
       rightPriceScale: {
-        borderColor: 'rgba(255,255,255,0.08)',
+        borderColor: isDark ? 'rgba(148,163,184,0.16)' : '#E2E8F0',
         scaleMargins: {
           top: 0.08,
           bottom: showVolume ? 0.22 : 0.08,
         },
       },
       timeScale: {
-        borderColor: 'rgba(255,255,255,0.08)',
+        borderColor: isDark ? 'rgba(148,163,184,0.16)' : '#E2E8F0',
         timeVisible: true,
         secondsVisible: false,
         rightOffset: 6,
@@ -571,6 +628,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     config.emaMid,
     config.emaSlow,
     chartHeight,
+    isDark,
   ]);
 
   // Apply chartHeight dynamically when toggling expanded mode without recreating series data
@@ -747,7 +805,26 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       lastStructureKeyRef.current = structureKey;
     }
 
-    const levelsKey = `${chartStyle}:${showLevels}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${effectiveLastBar.time}`;
+    const normKey = (v: string) => v.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const instIdNorm = normKey(instrument.id);
+    const instSymNorm = normKey(instrument.symbol);
+    const matchingOpenTrades = (openTrades || []).filter((t) => {
+      if (t.status !== 'OPEN') return false;
+      const tNorm = normKey(t.instrument);
+      const matches = tNorm === instIdNorm || tNorm === instSymNorm || tNorm.includes(instIdNorm);
+      if (!matches) return false;
+      const refPrice = effectiveLastBar.close;
+      return Math.abs(refPrice - t.entryPrice) / Math.max(t.entryPrice, 1) <= 0.45;
+    });
+
+    const openTradesKey = matchingOpenTrades
+      .map((t) => {
+        const tr = tradeProtectionMap?.[t.id];
+        return `${t.id}:${t.entryPrice}:${tr?.currentSl ?? t.stopLoss}:${tr?.tpStage ?? t.tpStage ?? 0}:${tr?.target1 ?? t.target1}:${tr?.target2 ?? t.target2 ?? ''}:${tr?.target3 ?? t.target3 ?? ''}`;
+      })
+      .join('|');
+
+    const levelsKey = `${chartStyle}:${showLevels}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${openTradesKey}:${effectiveLastBar.time}`;
 
     if (lastLevelsKeyRef.current !== levelsKey) {
       for (const line of priceLinesRef.current) {
@@ -844,6 +921,80 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         });
       }
 
+      // Overlay active open position Entry, Trailed SL, TP1, TP2, TP3 lines on canvas
+      for (const pos of matchingOpenTrades.slice(0, 2)) {
+        const trail = tradeProtectionMap?.[pos.id];
+        const activeSl = trail ? trail.currentSl : pos.stopLoss;
+        const tpStage = trail?.tpStage ?? pos.tpStage ?? 0;
+        const tp1Val = trail?.target1 ?? pos.target1;
+        const tp2Val = trail?.target2 ?? pos.target2;
+        const tp3Val = trail?.target3 ?? pos.target3;
+
+        priceLinesRef.current.push(
+          mainSeries.createPriceLine({
+            price: pos.entryPrice,
+            color: '#2563EB',
+            lineWidth: 2,
+            lineStyle: LineStyle.Solid,
+            axisLabelVisible: true,
+            title: `POS ${pos.direction} (${pos.quantity})`,
+          })
+        );
+        if (activeSl > 0) {
+          priceLinesRef.current.push(
+            mainSeries.createPriceLine({
+              price: activeSl,
+              color: tpStage > 0 ? '#10B981' : '#EF4444',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dashed,
+              axisLabelVisible: true,
+              title:
+                tpStage === 2
+                  ? 'TRAIL SL (TP1)'
+                  : tpStage === 1
+                    ? 'TRAIL SL (BE)'
+                    : 'POS SL',
+            })
+          );
+        }
+        if (tp1Val > 0) {
+          priceLinesRef.current.push(
+            mainSeries.createPriceLine({
+              price: tp1Val,
+              color: '#10B981',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: tpStage >= 1 ? 'TP1 ✓' : 'TP1',
+            })
+          );
+        }
+        if (tp2Val && tp2Val > 0) {
+          priceLinesRef.current.push(
+            mainSeries.createPriceLine({
+              price: tp2Val,
+              color: '#059669',
+              lineWidth: 1,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: tpStage >= 2 ? 'TP2 ✓' : 'TP2',
+            })
+          );
+        }
+        if (tp3Val && tp3Val > 0) {
+          priceLinesRef.current.push(
+            mainSeries.createPriceLine({
+              price: tp3Val,
+              color: '#0EA5E9',
+              lineWidth: 2,
+              lineStyle: LineStyle.Dotted,
+              axisLabelVisible: true,
+              title: 'TP3 EXIT',
+            })
+          );
+        }
+      }
+
       markersPluginRef.current?.setMarkers(markers);
       lastLevelsKeyRef.current = levelsKey;
     }
@@ -856,6 +1007,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     chartMode,
     chartStyle,
     instrument.id,
+    instrument.symbol,
     timeframe,
     quote,
     uniqueCandles,
@@ -865,6 +1017,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     showLevels,
     config,
     activeSignal,
+    openTrades,
+    tradeProtectionMap,
   ]);
 
   // Sync User Horizontal Price Lines onto Lightweight Charts series
@@ -886,7 +1040,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         userHLineRefs.current.push(
           series.createPriceLine({
             price: d.price,
-            color: '#C9A24D',
+            color: isDark ? '#38BDF8' : '#1D4ED8',
             lineWidth: 2,
             lineStyle: LineStyle.Solid,
             axisLabelVisible: true,
@@ -1119,10 +1273,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const tvEmbedUrl = useMemo(() => {
     const tvSymbol = instrument.tradingViewSymbol;
     const tvInterval = mapTimeframeToTv(timeframe);
+    const tvTheme = isDark ? 'dark' : 'light';
+    const tvBg = isDark ? '0B1424' : 'FFFFFF';
     return `https://s.tradingview.com/widgetembed/?frameElementId=mytrade_tv_widget&symbol=${encodeURIComponent(
       tvSymbol
-    )}&interval=${tvInterval}&hidesidetoolbar=0&hidetoptoolbar=0&symboledit=1&saveimage=1&toolbarbg=0C0F14&studies=%5B%22MAExp%40tv-basicstudies%22%2C%22VWAP%40tv-basicstudies%22%2C%22RSI%40tv-basicstudies%22%5D&theme=dark&style=1&timezone=Asia%2FKolkata&withdateranges=1&details=0&showpopupbutton=0&locale=en`;
-  }, [instrument.tradingViewSymbol, timeframe]);
+    )}&interval=${tvInterval}&hidesidetoolbar=0&hidetoptoolbar=0&symboledit=1&saveimage=1&toolbarbg=${tvBg}&studies=%5B%22MAExp%40tv-basicstudies%22%2C%22VWAP%40tv-basicstudies%22%2C%22RSI%40tv-basicstudies%22%5D&theme=${tvTheme}&style=1&timezone=Asia%2FKolkata&withdateranges=1&details=0&showpopupbutton=0&locale=en`;
+  }, [instrument.tradingViewSymbol, timeframe, isDark]);
 
   const tvExternalChartUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
     instrument.tradingViewSymbol
@@ -1132,17 +1288,17 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
   return (
     <div
-      className={`bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden flex flex-col ${
+      className={`bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col ${
         isExpanded ? 'fixed inset-3 z-50 shadow-2xl' : ''
       }`}
     >
       {/* Top Row: Market Identity + Engine Mode + External TradingView Link */}
-      <div className="px-4 py-3 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
+      <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-white">
+          <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
             <span>{quote?.instrument.symbol ?? instrument.symbol}</span>
             <span className="text-slate-500">·</span>
-            <span className="text-xs font-normal text-slate-400">
+            <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
               {quote?.instrument.exchangeLabel ?? instrument.exchangeLabel}
             </span>
             {quote?.available && quote.price !== undefined && (
@@ -1150,7 +1306,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 <span className="text-slate-500">·</span>
                 <span
                   ref={liveHeaderPriceRef}
-                  className="font-mono-tabular text-sm font-semibold text-emerald-300"
+                  className="font-mono-tabular text-sm font-semibold text-emerald-700 dark:text-emerald-300"
                 >
                   {instrument.currency}
                   {quote.price.toLocaleString()}
@@ -1160,14 +1316,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             {liveStreaming && quote?.available && chartMode === 'MY_TRADE_LIVE' && (
               <>
                 <span className="text-slate-500">·</span>
-                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   {supportsBinanceWs && wsStatus === 'CONNECTED' ? 'WS 30ms' : 'LIVE'}
                 </span>
               </>
             )}
           </div>
-          <p className="text-[11px] text-slate-400 truncate mt-0.5">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
             {chartMode === 'TRADING_VIEW'
               ? `TradingView Interactive Chart (${instrument.tradingViewSymbol}) · Drawing tools, indicators & zoom enabled`
               : quote?.available
@@ -1184,14 +1340,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
         <div className="flex flex-wrap items-center gap-2">
           {/* Chart Engine Mode Switch: My Trade Live vs TradingView */}
-          <div className="flex items-center bg-[#090B0E] border border-white/[0.08] rounded-lg p-0.5">
+          <div className="flex items-center bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
             <button
               type="button"
               onClick={() => setChartMode('MY_TRADE_LIVE')}
               className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 chartMode === 'MY_TRADE_LIVE'
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950 font-semibold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               My Trade Live
@@ -1201,8 +1357,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               onClick={() => setChartMode('TRADING_VIEW')}
               className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 chartMode === 'TRADING_VIEW'
-                  ? 'bg-emerald-600 text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950 font-semibold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               TradingView
@@ -1214,8 +1370,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             onClick={onToggleLiveStreaming}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
               liveStreaming
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-[#090B0E] border-white/[0.08] text-slate-400'
+                ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'
             }`}
           >
             {liveStreaming ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -1227,7 +1383,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             onClick={onRefresh}
             disabled={loading}
             aria-label="Refresh chart data"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Sync
@@ -1237,7 +1393,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             href={tvExternalChartUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-sky-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-blue-700 dark:text-sky-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             TradingView
             <ExternalLink className="w-3 h-3" />
@@ -1246,10 +1402,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       </div>
 
       {/* Second Toolbar: Timeframes, Series Style, Studies & Zoom Controls */}
-      <div className="px-4 py-2 border-b border-white/[0.06] bg-[#0C0F14]/80 flex flex-wrap items-center justify-between gap-2">
+      <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-[#0B1424]/90 flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           {/* Timeframe Selector */}
-          <div className="flex items-center bg-[#090B0E] border border-white/[0.08] rounded-lg p-0.5">
+          <div className="flex items-center bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
             {TIMEFRAMES.map((tf) => (
               <button
                 key={tf}
@@ -1257,8 +1413,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={() => onTimeframeChange(tf)}
                 className={`px-2 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                   timeframe === tf
-                    ? 'bg-slate-800 text-white'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 {tf.toUpperCase()}
@@ -1269,15 +1425,15 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           {chartMode === 'MY_TRADE_LIVE' && (
             <>
               {/* Chart Style: Candles vs Area */}
-              <div className="flex items-center bg-[#090B0E] border border-white/[0.08] rounded-lg p-0.5">
+              <div className="flex items-center bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
                 <button
                   type="button"
                   onClick={() => setChartStyle('CANDLES')}
                   title="Candlestick Chart"
                   className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                     chartStyle === 'CANDLES'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
                   <CandlestickChart className="w-3.5 h-3.5" />
@@ -1289,8 +1445,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                   title="Line / Area Chart"
                   className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                     chartStyle === 'AREA'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-slate-200'
+                      ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                   }`}
                 >
                   <TrendingUp className="w-3.5 h-3.5" />
@@ -1304,8 +1460,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={() => setShowEmas((v) => !v)}
                 className={`px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
                   showEmas
-                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/35 text-amber-700 dark:text-amber-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 EMA {config.emaFast}/{config.emaMid}/{config.emaSlow}
@@ -1316,8 +1472,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={() => setShowVwap((v) => !v)}
                 className={`px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
                   showVwap
-                    ? 'bg-slate-700/40 border-slate-500/40 text-slate-200'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    ? 'bg-slate-700/40 border-slate-500/40 text-slate-800 dark:text-slate-200'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 VWAP
@@ -1328,8 +1484,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={() => setShowVolume((v) => !v)}
                 className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
                   showVolume
-                    ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-50 dark:bg-sky-500/10 border-blue-200 dark:border-sky-500/35 text-blue-700 dark:text-sky-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 <BarChart3 className="w-3.5 h-3.5" />
@@ -1341,8 +1497,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={() => setShowLevels((v) => !v)}
                 className={`inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
                   showLevels
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 <Layers className="w-3.5 h-3.5" />
@@ -1355,13 +1511,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         {/* Zoom In, Zoom Out, Fit & Expand Controls */}
         <div className="flex items-center gap-1.5">
           {chartMode === 'MY_TRADE_LIVE' && (
-            <div className="flex items-center bg-[#090B0E] border border-white/[0.08] rounded-lg p-0.5">
+            <div className="flex items-center bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
               <button
                 type="button"
                 onClick={handleZoomIn}
                 title="Zoom In"
                 aria-label="Zoom in chart"
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
                 <span>Zoom In</span>
@@ -1371,7 +1527,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={handleZoomOut}
                 title="Zoom Out"
                 aria-label="Zoom out chart"
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
                 <span>Zoom Out</span>
@@ -1381,7 +1537,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={handleResetView}
                 title="Fit All Candles"
                 aria-label="Fit chart view"
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Fit</span>
@@ -1391,7 +1547,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 onClick={handleScrollToLatest}
                 title="Jump to Latest Bar"
                 aria-label="Jump to latest candle"
-                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-300 hover:text-white hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06] rounded-md transition-colors whitespace-nowrap shrink-0"
               >
                 <ArrowRightToLine className="w-3.5 h-3.5" />
               </button>
@@ -1403,7 +1559,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             onClick={() => setIsExpanded((v) => !v)}
             title={isExpanded ? 'Exit Fullscreen' : 'Expand Chart'}
             aria-label={isExpanded ? 'Exit fullscreen chart' : 'Expand chart'}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             {isExpanded ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
             <span>{isExpanded ? 'Exit' : 'Expand'}</span>
@@ -1411,10 +1567,96 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         </div>
       </div>
 
+      {/* Institutional One-Click Quick-Trade Bar (Bid / Spread / Ask + 1-Click SELL/BUY + Alert) */}
+      {onQuickOrder && quote?.available && typeof quote.price === 'number' && (
+        <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0E182A] flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={quickOrdering !== null}
+              onClick={async () => {
+                const qty = Math.max(0.01, Number(quickQty) || 1);
+                setQuickOrdering('SELL');
+                try {
+                  await onQuickOrder('SELL', qty);
+                } finally {
+                  setQuickOrdering(null);
+                }
+              }}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              <span>{quickOrdering === 'SELL' ? 'Sending...' : 'SELL'}</span>
+              <span className="font-mono-tabular text-[11px] opacity-95">
+                {instrument.currency}
+                {formatPrice(quote.bid ?? quote.price)}
+              </span>
+            </button>
+
+            <div className="px-2 py-1 rounded-md bg-slate-100 dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 text-[11px] font-mono-tabular text-slate-600 dark:text-slate-300">
+              Spread{' '}
+              <span className="font-semibold text-slate-900 dark:text-white">
+                {typeof quote.spreadBps === 'number'
+                  ? `${quote.spreadBps.toFixed(1)} bps`
+                  : typeof quote.spread === 'number'
+                    ? formatPrice(quote.spread)
+                    : '—'}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={quickOrdering !== null}
+              onClick={async () => {
+                const qty = Math.max(0.01, Number(quickQty) || 1);
+                setQuickOrdering('BUY');
+                try {
+                  await onQuickOrder('BUY', qty);
+                } finally {
+                  setQuickOrdering(null);
+                }
+              }}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition-colors disabled:opacity-50"
+            >
+              <span>{quickOrdering === 'BUY' ? 'Sending...' : 'BUY'}</span>
+              <span className="font-mono-tabular text-[11px] opacity-95">
+                {instrument.currency}
+                {formatPrice(quote.ask ?? quote.price)}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+              <span>Qty</span>
+              <input
+                type="number"
+                min={0.01}
+                step="any"
+                value={quickQty}
+                onChange={(e) => setQuickQty(e.target.value)}
+                aria-label="Quick order quantity"
+                className="w-16 px-2 py-1 rounded-md bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-700 font-mono-tabular text-xs font-semibold text-slate-900 dark:text-white text-right"
+              />
+            </label>
+            {onQuickPriceAlert && (
+              <button
+                type="button"
+                onClick={() => onQuickPriceAlert(quote.price!)}
+                title="Create quick price alert near current spot"
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 transition-colors"
+              >
+                <Bell className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400" />
+                <span>+ Alert</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Main Chart Surface */}
       {chartMode === 'TRADING_VIEW' ? (
         <div
-          className={`w-full bg-[#0C0F14] ${
+          className={`w-full bg-white dark:bg-[#0B1424] ${
             isExpanded ? 'flex-1 min-h-0' : 'h-[490px]'
           }`}
         >
@@ -1429,18 +1671,18 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       ) : loading && !quote ? (
         <div
           style={{ height: chartHeight }}
-          className="flex items-center justify-center bg-[#0C0F14] text-sm text-slate-400"
+          className="flex items-center justify-center bg-white dark:bg-[#0B1424] text-sm text-slate-500 dark:text-slate-400"
         >
           Connecting to live OHLCV candlestick feed...
         </div>
       ) : quote && !quote.available ? (
         <div
           style={{ height: chartHeight }}
-          className="flex flex-col items-center justify-center bg-[#0C0F14] p-6 text-center space-y-3"
+          className="flex flex-col items-center justify-center bg-white dark:bg-[#0B1424] p-6 text-center space-y-3"
         >
-          <AlertCircle className="w-8 h-8 text-amber-400" />
-          <div className="text-base font-semibold text-white">DATA UNAVAILABLE</div>
-          <p className="text-xs text-slate-400 max-w-md leading-relaxed">
+          <AlertCircle className="w-8 h-8 text-amber-700 dark:text-amber-400" />
+          <div className="text-base font-semibold text-slate-900 dark:text-white">DATA UNAVAILABLE</div>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md leading-relaxed">
             {quote.unavailableReason ||
               'Live OHLCV feed is currently unavailable. Switch to the interactive TradingView chart below.'}
           </p>
@@ -1456,7 +1698,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               href={tvExternalChartUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-sky-300 rounded-lg transition-colors"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-blue-700 dark:text-sky-300 rounded-lg transition-colors"
             >
               Launch TradingView.com
               <ExternalLink className="w-3.5 h-3.5" />
@@ -1468,7 +1710,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           {/* TradingView-style Left Vertical Drawing Tool Rail */}
           <div
             aria-label="Chart drawing tools"
-            className="w-11 shrink-0 border-r border-white/[0.08] bg-[#0C0F14] py-2.5 flex flex-col items-center justify-between"
+            className="w-11 shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424] py-2.5 flex flex-col items-center justify-between"
           >
             <div className="flex flex-col items-center gap-1.5">
               <button
@@ -1482,7 +1724,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'CROSSHAIR'
                     ? 'bg-emerald-600 text-white'
-                    : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
                 }`}
               >
                 <Crosshair className="w-4 h-4" />
@@ -1498,8 +1740,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 title="Trend Line (Click 2 points)"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'TRENDLINE'
-                    ? 'bg-[#C9A24D] text-[#090B0E]'
-                    : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                    ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
                 }`}
               >
                 <TrendingUp className="w-4 h-4" />
@@ -1515,8 +1757,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 title="Horizontal Price Line (Click chart)"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'HLINE'
-                    ? 'bg-[#C9A24D] text-[#090B0E]'
-                    : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                    ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
                 }`}
               >
                 <Minus className="w-4 h-4" />
@@ -1532,21 +1774,21 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 title="Price & Bar Range Ruler (Click 2 points)"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'MEASURE'
-                    ? 'bg-[#C9A24D] text-[#090B0E]'
-                    : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                    ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
                 }`}
               >
                 <Ruler className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="flex flex-col items-center gap-1.5 pt-2 border-t border-white/[0.06]">
+            <div className="flex flex-col items-center gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-800">
               <button
                 type="button"
                 disabled={drawings.length === 0}
                 onClick={() => setDrawings((prev) => prev.slice(0, -1))}
                 title="Undo Last Drawing"
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/[0.06] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06] disabled:opacity-30 disabled:pointer-events-none transition-colors"
               >
                 <Undo2 className="w-4 h-4" />
               </button>
@@ -1559,7 +1801,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                   setPreviewPoint(null);
                 }}
                 title="Clear All Drawings"
-                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-400 hover:bg-white/[0.06] disabled:opacity-30 disabled:pointer-events-none transition-colors"
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 dark:text-slate-400 hover:text-rose-700 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-white/[0.06] disabled:opacity-30 disabled:pointer-events-none transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
@@ -1569,30 +1811,30 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           {/* Chart Canvas + Floating OHLCV Legend + Synced Vector Overlay */}
           <div
             style={isExpanded ? undefined : { height: chartHeight }}
-            className={`relative flex-1 min-w-0 bg-[#0C0F14] ${isExpanded ? 'h-full' : ''}`}
+            className={`relative flex-1 min-w-0 bg-white dark:bg-[#0B1424] ${isExpanded ? 'h-full' : ''}`}
           >
             {/* Floating OHLCV HUD */}
             {displayStats && (
-              <div className="pointer-events-none absolute top-2.5 left-3 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 bg-[#0C0F14]/85 backdrop-blur-sm border border-white/[0.06] rounded-md px-2.5 py-1 text-[11px] font-mono-tabular">
-                <span className="text-slate-400">
-                  O <span className="text-white">{formatPrice(displayStats.open)}</span>
+              <div className="pointer-events-none absolute top-2.5 left-3 z-20 flex flex-wrap items-center gap-x-3 gap-y-1 bg-slate-50/95 dark:bg-[#0B1424]/90 backdrop-blur-sm border border-slate-200 dark:border-slate-800 rounded-md px-2.5 py-1 text-[11px] font-mono-tabular">
+                <span className="text-slate-500 dark:text-slate-400">
+                  O <span className="text-slate-900 dark:text-white">{formatPrice(displayStats.open)}</span>
                 </span>
-                <span className="text-slate-400">
-                  H <span className="text-emerald-400">{formatPrice(displayStats.high)}</span>
+                <span className="text-slate-500 dark:text-slate-400">
+                  H <span className="text-emerald-700 dark:text-emerald-400">{formatPrice(displayStats.high)}</span>
                 </span>
-                <span className="text-slate-400">
-                  L <span className="text-red-400">{formatPrice(displayStats.low)}</span>
+                <span className="text-slate-500 dark:text-slate-400">
+                  L <span className="text-rose-700 dark:text-rose-400">{formatPrice(displayStats.low)}</span>
                 </span>
-                <span className="text-slate-400">
+                <span className="text-slate-500 dark:text-slate-400">
                   C{' '}
-                  <span className={displayStats.changePct >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  <span className={displayStats.changePct >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}>
                     {formatPrice(displayStats.close)} ({displayStats.changePct >= 0 ? '+' : ''}
                     {displayStats.changePct.toFixed(2)}%)
                   </span>
                 </span>
                 {typeof displayStats.volume === 'number' && displayStats.volume > 0 && (
-                  <span className="text-slate-400">
-                    V <span className="text-sky-300">{Math.round(displayStats.volume).toLocaleString()}</span>
+                  <span className="text-slate-500 dark:text-slate-400">
+                    V <span className="text-blue-700 dark:text-sky-300">{Math.round(displayStats.volume).toLocaleString()}</span>
                   </span>
                 )}
               </div>
@@ -1600,7 +1842,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
             {/* Active Drawing Tool Helper Prompt */}
             {activeTool !== 'CROSSHAIR' && (
-              <div className="pointer-events-none absolute bottom-3 left-3 z-20 bg-[#11141A]/95 border border-[#C9A24D]/40 rounded-md px-2.5 py-1 text-[11px] text-[#E6EDF3]">
+              <div className="pointer-events-none absolute bottom-3 left-3 z-20 bg-white/95 dark:bg-[#0E182A]/95 border border-blue-300 dark:border-sky-500/40 rounded-md px-2.5 py-1 text-[11px] text-slate-900 dark:text-slate-100">
                 {activeTool === 'HLINE' && 'Click chart to place horizontal level · Press Esc to exit'}
                 {activeTool === 'TRENDLINE' &&
                   (pendingPoint
@@ -1633,6 +1875,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 if (!a || !b) return null;
 
                 if (d.kind === 'TRENDLINE') {
+                  const drawStroke = isDark ? '#38BDF8' : '#1D4ED8';
                   return (
                     <g key={d.id}>
                       <line
@@ -1640,11 +1883,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                         y1={a.y}
                         x2={b.x}
                         y2={b.y}
-                        stroke="#C9A24D"
+                        stroke={drawStroke}
                         strokeWidth={2}
                       />
-                      <circle cx={a.x} cy={a.y} r={3.5} fill="#C9A24D" />
-                      <circle cx={b.x} cy={b.y} r={3.5} fill="#C9A24D" />
+                      <circle cx={a.x} cy={a.y} r={3.5} fill={drawStroke} />
+                      <circle cx={b.x} cy={b.y} r={3.5} fill={drawStroke} />
                     </g>
                   );
                 }
@@ -1678,14 +1921,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                       width={164}
                       height={18}
                       rx={4}
-                      fill="#11141A"
+                      fill={isDark ? '#0E182A' : '#FFFFFF'}
                       stroke={accent}
                       strokeWidth={0.8}
                     />
                     <text
                       x={minX + 6}
                       y={Math.max(16, minY - 10)}
-                      fill="#F8FAFC"
+                      fill={isDark ? '#F8FAFC' : '#0F172A'}
                       fontSize="10"
                       fontFamily="'JetBrains Mono', monospace"
                     >
@@ -1707,7 +1950,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                       y1={a.y}
                       x2={b.x}
                       y2={b.y}
-                      stroke="#C9A24D"
+                      stroke={isDark ? '#38BDF8' : '#1D4ED8'}
                       strokeWidth={1.5}
                       strokeDasharray="4 3"
                     />

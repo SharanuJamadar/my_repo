@@ -41,22 +41,22 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
           onClick={() => setShowIOSGuide(true)}
           className={`${
             compact ? 'px-3 py-1.5 text-xs' : 'w-full px-3.5 py-2 text-xs'
-          } inline-flex items-center justify-center gap-2 rounded-lg border border-white/[0.1] bg-[#161A22] hover:bg-slate-800 text-slate-200 font-medium transition-colors whitespace-nowrap shrink-0`}
+          } inline-flex items-center justify-center gap-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 text-slate-800 dark:text-slate-200 font-medium transition-colors whitespace-nowrap shrink-0`}
         >
-          <Smartphone className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+          <Smartphone className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
           <span>Install on iOS</span>
         </button>
 
         {showIOSGuide && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-            <div className="w-full max-w-sm rounded-xl bg-[#11141A] border border-white/[0.1] p-6 shadow-2xl">
-              <h3 className="text-base font-semibold text-white">Install My Trade on iPhone / iPad</h3>
-              <p className="mt-2.5 text-xs leading-relaxed text-slate-300">
-                1. Tap the <strong className="text-white">Share</strong> button in the Safari toolbar.
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/45 dark:bg-black/70 p-4">
+            <div className="w-full max-w-sm rounded-xl bg-white dark:bg-[#0E182A] border border-slate-300 dark:border-slate-700 p-6 shadow-2xl">
+              <h3 className="text-base font-semibold text-slate-900 dark:text-white">Install My Trade on iPhone / iPad</h3>
+              <p className="mt-2.5 text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+                1. Tap the <strong className="text-slate-900 dark:text-white">Share</strong> button in the Safari toolbar.
                 <br />
-                2. Scroll down and tap <strong className="text-white">Add to Home Screen</strong>.
+                2. Scroll down and tap <strong className="text-slate-900 dark:text-white">Add to Home Screen</strong>.
                 <br />
-                3. Tap <strong className="text-white">Add</strong> to launch My Trade as a standalone mobile app.
+                3. Tap <strong className="text-slate-900 dark:text-white">Add</strong> to launch My Trade as a standalone mobile app.
               </p>
               <button
                 type="button"
@@ -77,9 +77,9 @@ export const PWAInstallButton: React.FC<PWAInstallButtonProps> = ({
       <button
         type="button"
         onClick={onOpenMobileHub}
-        className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-white/[0.08] bg-[#161A22] hover:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-200 transition-colors whitespace-nowrap shrink-0"
+        className="w-full inline-flex items-center justify-center gap-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 px-3 py-2 text-xs font-medium text-slate-800 dark:text-slate-200 transition-colors whitespace-nowrap shrink-0"
       >
-        <Smartphone className="w-3.5 h-3.5 text-[#C9A24D] shrink-0" />
+        <Smartphone className="w-3.5 h-3.5 text-blue-700 dark:text-sky-400 shrink-0" />
         <span>App Download (APK)</span>
       </button>
     );

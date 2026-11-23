@@ -7,6 +7,7 @@ import type {
   StrategyConfig,
   TelegramLogRecord,
 } from '../types/trading';
+import { authFetch } from '../lib/authFetch';
 
 interface DetectedChat {
   id: string;
@@ -59,8 +60,12 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
     setDetectingChats(true);
     setDetectHint(null);
     try {
-      const res = await fetch('/api/telegram/chats');
+      const res = await authFetch('/api/telegram/chats');
       const data = await res.json();
+      if (!res.ok) {
+        setDetectHint(data.error || 'Sign in with Google to detect Telegram bot chats.');
+        return;
+      }
       const chats: DetectedChat[] = Array.isArray(data.chats) ? data.chats : [];
       setDetectedChats(chats);
       if (chats.length > 0) {
@@ -110,18 +115,18 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-white">Telegram Broadcast & Order Execution Desk</h2>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Telegram Broadcast & Order Execution Desk</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
           Manual signal approval queue, Target/SL alerts, Telegram audit log, and Broker Order audit trail
         </p>
       </div>
 
       {config.killSwitchActive && (
-        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center gap-3 text-xs text-red-200">
-          <AlertOctagon className="w-5 h-5 text-red-400 shrink-0" />
+        <div className="p-4 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/35 rounded-xl flex items-center gap-3 text-xs text-rose-800 dark:text-rose-200">
+          <AlertOctagon className="w-5 h-5 text-rose-700 dark:text-rose-400 shrink-0" />
           <div>
             <div className="font-semibold">Emergency Kill Switch ACTIVE</div>
-            <div className="text-red-300/90">
+            <div className="text-rose-700 dark:text-rose-300/90">
               All paper and live order placements are halted. Disable Kill Switch in Admin Settings to resume execution.
             </div>
           </div>
@@ -130,38 +135,38 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
 
       {/* Integration Status Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4">
-          <div className="text-xs text-slate-400">Order Execution Mode</div>
-          <div className="text-base font-semibold text-white mt-1">
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Order Execution Mode</div>
+          <div className="text-base font-semibold text-slate-900 dark:text-white mt-1">
             {config.paperTradingOnly ? 'PAPER TRADING (Locked Default)' : 'PAPER + LIVE ENABLED'}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
             Broker Auth: {brokerConfigured ? 'Configured on Server' : 'Optional — Paper Trading Ready'}
           </div>
         </div>
 
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4">
-          <div className="text-xs text-slate-400">Telegram Bot Connectivity</div>
-          <div className="text-base font-semibold text-white mt-1">
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Telegram Bot Connectivity</div>
+          <div className="text-base font-semibold text-slate-900 dark:text-white mt-1">
             {telegramConfigured
               ? telegramBotUsername
                 ? `Active (${telegramBotUsername})`
                 : 'Bot Token Active'
               : 'Optional (Not Connected)'}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
             Target: {config.telegramChannelLabel} ·{' '}
             {telegramChatConfigured ? 'Chat Ready' : 'Select or Detect Chat Below'} · Auto-Send:{' '}
             {config.autoBroadcastTelegram ? 'ON' : 'OFF'}
           </div>
         </div>
 
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4">
-          <div className="text-xs text-slate-400">Published / Logged Signals</div>
-          <div className="font-mono-tabular text-base font-semibold text-white mt-1">
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Published / Logged Signals</div>
+          <div className="font-mono-tabular text-base font-semibold text-slate-900 dark:text-white mt-1">
             {telegramLogs.length} Telegram Logs · {orders.length} Orders
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
             Duplicate order guard active (60s cooldown)
           </div>
         </div>
@@ -169,13 +174,13 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
 
       {/* Destination Channel / Chat Selector (No API Key/Token Input) */}
       {telegramConfigured && (
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4 space-y-3">
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h3 className="text-sm font-semibold text-white">
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                 Telegram Destination Channel / Chat
               </h3>
-              <p className="text-[11px] text-slate-400">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Bot token is active on the server ({telegramBotUsername || 'Telegram Bot'}). Send /start to the bot or add it as an admin to your channel, then click Detect Chat ID or enter your target @channel / Chat ID.
               </p>
             </div>
@@ -194,12 +199,12 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
               value={channelTargetInput}
               onChange={(e) => setChannelTargetInput(e.target.value)}
               placeholder="@your_channel or numeric Chat ID (e.g. -1001234567890)"
-              className="flex-1 min-w-[240px] bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white placeholder-slate-500 font-mono-tabular"
+              className="flex-1 min-w-[240px] bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 font-mono-tabular"
             />
             <button
               type="submit"
               disabled={savingTarget}
-              className="px-3.5 py-2 bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-white font-medium rounded-lg whitespace-nowrap shrink-0 disabled:opacity-50"
+              className="px-3.5 py-2 bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-medium rounded-lg whitespace-nowrap shrink-0 disabled:opacity-50"
             >
               {savingTarget ? 'Saving...' : 'Save Target'}
             </button>
@@ -207,7 +212,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
 
           {detectedChats.length > 0 && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
-              <span className="text-slate-400">Detected chats:</span>
+              <span className="text-slate-500 dark:text-slate-400">Detected chats:</span>
               {detectedChats.map((chat) => (
                 <button
                   key={chat.id}
@@ -217,7 +222,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                     await onUpdateChannelLabel(chat.id);
                     setDetectHint(`Selected ${chat.title} (${chat.id})`);
                   }}
-                  className="px-2.5 py-1 bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-emerald-300 rounded-md"
+                  className="px-2.5 py-1 bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-emerald-700 dark:text-emerald-300 rounded-md"
                 >
                   {chat.title} ({chat.id})
                 </button>
@@ -225,24 +230,24 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
             </div>
           )}
 
-          {detectHint && <p className="text-[11px] text-amber-300">{detectHint}</p>}
+          {detectHint && <p className="text-[11px] text-amber-700 dark:text-amber-300">{detectHint}</p>}
         </div>
       )}
 
       {/* Signal Management & Manual Telegram Approval Queue */}
-      <div className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-white/[0.08]">
-          <h3 className="text-sm font-semibold text-white">Saved Signals & Telegram Notification Queue</h3>
+      <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Saved Signals & Telegram Notification Queue</h3>
         </div>
         {signals.length === 0 ? (
-          <div className="p-8 text-center text-xs text-slate-400">
+          <div className="p-8 text-center text-xs text-slate-500 dark:text-slate-400">
             No saved signals yet. Generate and save a signal from the Dashboard or Chart Analysis BOT.
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
-                <tr className="border-b border-white/[0.06] text-[11px] text-slate-400">
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                   <th className="py-2.5 px-4 font-medium">Instrument / Contract</th>
                   <th className="py-2.5 px-4 font-medium">Direction</th>
                   <th className="py-2.5 px-4 font-medium text-right">Entry / SL / T1</th>
@@ -251,33 +256,33 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                   <th className="py-2.5 px-4 font-medium text-right">Telegram & Status Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/[0.06] text-xs">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                 {signals.slice(0, 20).map((sig) => (
-                  <tr key={sig.id} className="hover:bg-white/[0.03]">
+                  <tr key={sig.id} className="hover:bg-slate-100 dark:hover:bg-white/[0.06]">
                     <td className="py-3 px-4">
-                      <div className="font-semibold text-white">{sig.instrument}</div>
-                      <div className="text-[11px] text-slate-400">{sig.contract}</div>
+                      <div className="font-semibold text-slate-900 dark:text-white">{sig.instrument}</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">{sig.contract}</div>
                     </td>
                     <td className="py-3 px-4 font-medium">
                       <span
                         className={
                           sig.direction === 'BUY'
-                            ? 'text-emerald-400'
+                            ? 'text-emerald-700 dark:text-emerald-400'
                             : sig.direction === 'SELL'
-                              ? 'text-red-400'
-                              : 'text-amber-300'
+                              ? 'text-rose-700 dark:text-rose-400'
+                              : 'text-amber-700 dark:text-amber-300'
                         }
                       >
                         {sig.direction}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-right font-mono-tabular text-slate-300">
+                    <td className="py-3 px-4 text-right font-mono-tabular text-slate-700 dark:text-slate-300">
                       {sig.entryPrice} / {sig.stopLoss} / {sig.target1}
                     </td>
-                    <td className="py-3 px-4 text-right font-mono-tabular text-white">
+                    <td className="py-3 px-4 text-right font-mono-tabular text-slate-900 dark:text-white">
                       {sig.qualityScore}/100
                     </td>
-                    <td className="py-3 px-4 text-slate-300">{sig.status}</td>
+                    <td className="py-3 px-4 text-slate-700 dark:text-slate-300">{sig.status}</td>
                     <td className="py-3 px-4 text-right">
                       <div className="inline-flex flex-wrap justify-end gap-1.5">
                         <button
@@ -289,7 +294,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                               messageText: `My Trade\n\nInstrument: ${sig.instrument}\nContract: ${sig.contract}\nDirection: ${sig.direction}\nEntry: ${sig.entryPrice}\nT1: ${sig.target1} | T2: ${sig.target2}\nSL: ${sig.stopLoss}\nSTATUS: ${sig.status}\n\nTRADE SMART • STAY DISCIPLINED • FOLLOW THE CALL.`,
                             })
                           }
-                          className="px-2.5 py-1 text-[11px] bg-sky-600/20 hover:bg-sky-600/30 border border-sky-500/30 text-sky-300 rounded-md whitespace-nowrap"
+                          className="px-2.5 py-1 text-[11px] bg-blue-50 dark:bg-sky-600/20 hover:bg-blue-100 dark:hover:bg-sky-600/30 border border-blue-200 dark:border-sky-500/35 text-blue-700 dark:text-sky-300 rounded-md whitespace-nowrap"
                         >
                           Send Signal
                         </button>
@@ -305,7 +310,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                                   messageText: `My Trade — TARGET ACHIEVED\n${sig.instrument} (${sig.contract})\nTarget ${sig.target1} achieved from entry ${sig.entryPrice}.`,
                                 });
                               }}
-                              className="px-2.5 py-1 text-[11px] bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-md whitespace-nowrap"
+                              className="px-2.5 py-1 text-[11px] bg-emerald-50 dark:bg-emerald-600/20 hover:bg-emerald-100 dark:hover:bg-emerald-600/30 border border-emerald-200 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300 rounded-md whitespace-nowrap"
                             >
                               Target Hit
                             </button>
@@ -319,7 +324,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                                   messageText: `My Trade — STOP LOSS HIT\n${sig.instrument} (${sig.contract})\nStop-loss ${sig.stopLoss} triggered. Capital preserved.`,
                                 });
                               }}
-                              className="px-2.5 py-1 text-[11px] bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 text-red-300 rounded-md whitespace-nowrap"
+                              className="px-2.5 py-1 text-[11px] bg-rose-50 dark:bg-rose-600/20 hover:bg-rose-100 dark:hover:bg-rose-600/30 border border-rose-200 dark:border-rose-500/35 text-rose-700 dark:text-rose-300 rounded-md whitespace-nowrap"
                             >
                               SL Hit
                             </button>
@@ -337,21 +342,21 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Manual Market Update Broadcaster */}
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-5 space-y-3">
-          <h3 className="text-sm font-semibold text-white">Send Market Update to Telegram</h3>
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Send Market Update to Telegram</h3>
           <form onSubmit={handleBroadcastUpdate} className="space-y-3 text-xs">
             <input
               value={marketUpdateInstrument}
               onChange={(e) => setMarketUpdateInstrument(e.target.value)}
               placeholder="Instrument (e.g. NIFTY 50)"
-              className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white"
+              className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
             />
             <textarea
               rows={3}
               value={marketUpdateText}
               onChange={(e) => setMarketUpdateText(e.target.value)}
               placeholder="Write intraday key level update or volatility warning..."
-              className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white placeholder-slate-500"
+              className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
             />
             <button
               type="submit"
@@ -365,34 +370,34 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
         </div>
 
         {/* Telegram Broadcast Audit Log */}
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-white/[0.08]">
-            <h3 className="text-sm font-semibold text-white">Telegram Broadcast History</h3>
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+          <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800">
+            <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Telegram Broadcast History</h3>
           </div>
-          <div className="max-h-64 overflow-y-auto divide-y divide-white/[0.06] text-xs">
+          <div className="max-h-64 overflow-y-auto divide-y divide-slate-200 dark:divide-slate-800 text-xs">
             {telegramLogs.length === 0 ? (
-              <div className="p-6 text-center text-slate-400">No Telegram broadcasts logged yet.</div>
+              <div className="p-6 text-center text-slate-500 dark:text-slate-400">No Telegram broadcasts logged yet.</div>
             ) : (
               telegramLogs.map((log) => (
                 <div key={log.id} className="p-3.5 space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-white">
+                    <span className="font-semibold text-slate-900 dark:text-white">
                       {log.instrument} · {log.eventType}
                     </span>
                     <span
                       className={`font-mono-tabular text-[11px] ${
                         log.deliveryStatus === 'SENT'
-                          ? 'text-emerald-400'
+                          ? 'text-emerald-700 dark:text-emerald-400'
                           : log.deliveryStatus === 'NOT_CONFIGURED'
-                            ? 'text-amber-300'
-                            : 'text-red-400'
+                            ? 'text-amber-700 dark:text-amber-300'
+                            : 'text-rose-700 dark:text-rose-400'
                       }`}
                     >
                       {log.deliveryStatus}
                     </span>
                   </div>
                   {log.statusDetail && (
-                    <p className="text-[11px] text-slate-400">{log.statusDetail}</p>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">{log.statusDetail}</p>
                   )}
                 </div>
               ))
@@ -402,17 +407,17 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
       </div>
 
       {/* Execution Orders Audit Log */}
-      <div className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-white/[0.08]">
-          <h3 className="text-sm font-semibold text-white">Order Execution Audit Log</h3>
+      <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800">
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Order Execution Audit Log</h3>
         </div>
         {orders.length === 0 ? (
-          <div className="p-6 text-center text-xs text-slate-400">No orders placed yet.</div>
+          <div className="p-6 text-center text-xs text-slate-500 dark:text-slate-400">No orders placed yet.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="border-b border-white/[0.06] text-[11px] text-slate-400">
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                   <th className="py-2.5 px-4">Order ID</th>
                   <th className="py-2.5 px-4">Instrument / Contract</th>
                   <th className="py-2.5 px-4">Mode</th>
@@ -421,15 +426,15 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                   <th className="py-2.5 px-4">Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/[0.06]">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {orders.map((o) => (
                   <tr key={o.id}>
-                    <td className="py-2.5 px-4 font-mono-tabular text-slate-300">
+                    <td className="py-2.5 px-4 font-mono-tabular text-slate-700 dark:text-slate-300">
                       {o.brokerOrderId || o.id}
                     </td>
                     <td className="py-2.5 px-4">
-                      <div className="font-semibold text-white">{o.instrument}</div>
-                      <div className="text-[11px] text-slate-400">
+                      <div className="font-semibold text-slate-900 dark:text-white">{o.instrument}</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
                         {o.contract} {o.expiry ? `· ${o.expiry}` : ''}
                       </div>
                     </td>
@@ -438,7 +443,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
                     <td className="py-2.5 px-4 text-right font-mono-tabular">
                       {o.entryPrice} / {o.stopLoss} / {o.targetPrice}
                     </td>
-                    <td className="py-2.5 px-4 text-emerald-400 font-medium">{o.status}</td>
+                    <td className="py-2.5 px-4 text-emerald-700 dark:text-emerald-400 font-medium">{o.status}</td>
                   </tr>
                 ))}
               </tbody>

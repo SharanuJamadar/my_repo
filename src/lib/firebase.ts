@@ -67,16 +67,15 @@ export function handleFirestoreError(
 }
 
 export async function testConnection(): Promise<void> {
+  if (!auth.currentUser) return;
   try {
-    await getDocFromServer(doc(db, 'test', 'connection'));
+    await getDocFromServer(doc(db, 'users', auth.currentUser.uid));
   } catch (error) {
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.error('Please check your Firebase configuration.');
     }
   }
 }
-
-testConnection();
 
 export async function signInWithGoogle(): Promise<User> {
   const cred = await signInWithPopup(auth, googleProvider);

@@ -99,8 +99,8 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl font-semibold text-white">My Trade — AI Trading Assistant</h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-white">My Trade — AI Trading Assistant</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Enforces {config.trendTimeframe} Trend + {config.entryTimeframe} Entry · EMA {config.emaFast}/{config.emaMid}/{config.emaSlow} · Min Score {config.minSetupScore}/100
           </p>
         </div>
@@ -109,7 +109,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           <select
             value={selectedInstrumentId}
             onChange={(e) => onInstrumentChange(e.target.value)}
-            className="bg-[#11141A] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+            className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
           >
             {INSTRUMENTS.map((inst) => (
               <option key={inst.id} value={inst.id}>
@@ -121,7 +121,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           {messages.length > 0 && (
             <button
               onClick={onClearHistory}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               <Trash2 className="w-3.5 h-3.5" />
               Clear Chat
@@ -138,7 +138,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             type="button"
             disabled={sending}
             onClick={() => sendPrompt(q)}
-            className="px-3 py-1.5 text-xs bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-slate-300 hover:text-white rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="px-3 py-1.5 text-xs bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-white rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             {q}
           </button>
@@ -146,12 +146,12 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
       </div>
 
       {/* Chat Viewport */}
-      <div className="bg-[#11141A] border border-white/[0.08] rounded-xl flex flex-col h-[520px] overflow-hidden">
+      <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl flex flex-col h-[520px] overflow-hidden">
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
           {messages.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-center max-w-md mx-auto space-y-2">
-              <div className="text-sm font-semibold text-white">Strategy-Aligned Trading Desk Ready</div>
-              <p className="text-xs text-slate-400 leading-relaxed">
+              <div className="text-sm font-semibold text-slate-900 dark:text-white">Strategy-Aligned Trading Desk Ready</div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                 Ask for live multi-timeframe NIFTY, BANK NIFTY, SENSEX, MCX Crude Oil (EMA 9), Gold, or Crypto setups. You can also attach a TradingView screenshot directly in your message.
               </p>
             </div>
@@ -164,8 +164,8 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
                 <div
                   className={`max-w-[85%] rounded-xl px-4 py-3 text-xs leading-relaxed whitespace-pre-wrap ${
                     m.role === 'user'
-                      ? 'bg-emerald-600/20 border border-emerald-500/30 text-white'
-                      : 'bg-[#090B0E] border border-white/[0.08] text-slate-200 font-mono-tabular'
+                      ? 'bg-emerald-50 dark:bg-emerald-600/20 border border-emerald-200 dark:border-emerald-500/35 text-slate-900 dark:text-white'
+                      : 'bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 font-mono-tabular'
                   }`}
                 >
                   {m.content}
@@ -175,7 +175,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
           )}
           {sending && (
             <div className="flex justify-start">
-              <div className="bg-[#090B0E] border border-white/[0.08] rounded-xl px-4 py-3 text-xs text-slate-400">
+              <div className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                 Evaluating {selectedInstrumentId} across {config.trendTimeframe} & {config.entryTimeframe}...
               </div>
             </div>
@@ -184,25 +184,25 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
         </div>
 
         {error && (
-          <div className="mx-4 mb-2 px-3 py-2 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
+          <div className="mx-4 mb-2 px-3 py-2 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/35 rounded-lg text-xs text-rose-700 dark:text-rose-300">
             {error}
           </div>
         )}
 
         {attachedImage && (
-          <div className="mx-4 mb-2 p-2 bg-[#090B0E] border border-white/[0.08] rounded-lg flex items-center justify-between">
+          <div className="mx-4 mb-2 p-2 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg flex items-center justify-between">
             <div className="flex items-center gap-2">
               <img
                 src={attachedImage}
                 alt="Attached chart preview"
                 className="w-10 h-10 object-cover rounded"
               />
-              <span className="text-xs text-slate-300">Chart screenshot attached</span>
+              <span className="text-xs text-slate-700 dark:text-slate-300">Chart screenshot attached</span>
             </div>
             <button
               type="button"
               onClick={() => setAttachedImage('')}
-              className="p-1 text-slate-400 hover:text-white"
+              className="p-1 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
             >
               <X className="w-4 h-4" />
             </button>
@@ -214,7 +214,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             e.preventDefault();
             sendPrompt(input);
           }}
-          className="p-3 border-t border-white/[0.08] bg-[#0C0F14] flex items-center gap-2"
+          className="p-3 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424] flex items-center gap-2"
         >
           <input
             ref={fileRef}
@@ -230,7 +230,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             type="button"
             onClick={() => fileRef.current?.click()}
             title="Attach chart screenshot"
-            className="p-2.5 bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded-lg transition-colors shrink-0"
+            className="p-2.5 bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg transition-colors shrink-0"
           >
             <ImagePlus className="w-4 h-4" />
           </button>
@@ -240,7 +240,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="Ask about NIFTY CE/PE, MCX Crude Oil EMA 9, 15m trend, or S/R levels..."
-            className="flex-1 bg-[#11141A] border border-white/[0.08] rounded-lg px-3.5 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+            className="flex-1 bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-lg px-3.5 py-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
 
           <button

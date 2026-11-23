@@ -112,16 +112,16 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
   };
 
   return (
-    <section className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
+    <section className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
       {/* Header & Controls */}
-      <div className="px-6 py-5 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-4">
+      <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Newspaper className="w-4 h-4 text-[#C9A24D] shrink-0" />
+          <Newspaper className="w-4 h-4 text-blue-700 dark:text-sky-400 shrink-0" />
           <div>
-            <h2 className="text-base font-semibold text-white tracking-tight">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white tracking-tight">
               Live Market News
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Real-time breaking catalysts from Yahoo Finance, Google News, Economic Times, CNBC & CoinDesk
             </p>
           </div>
@@ -137,7 +137,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
             type="button"
             onClick={() => void loadLiveNews({ forceRefresh: true })}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             <span>{loading ? 'Updating...' : 'Refresh Live'}</span>
@@ -146,8 +146,8 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
       </div>
 
       {/* Category Tabs + Search Filter */}
-      <div className="px-6 py-3.5 border-b border-white/[0.06] bg-[#0C0F14]/60 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-1 p-1 bg-[#090B0E] border border-white/[0.06] rounded-lg">
+      <div className="px-6 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#0B1424]/60 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg">
           {CATEGORY_TABS.map((tab) => (
             <button
               key={tab.id}
@@ -155,8 +155,8 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
               onClick={() => setCategory(tab.id)}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                 category === tab.id
-                  ? 'bg-[#161A22] text-white'
-                  : 'text-slate-400 hover:text-slate-200'
+                  ? 'bg-slate-100 dark:bg-[#152238] text-slate-900 dark:text-white'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
               }`}
             >
               {tab.label}
@@ -172,13 +172,13 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder="Filter news (e.g. Gold Fed, RBI Nifty, OPEC)"
-              className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-[#C9A24D]"
+              className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-600 dark:focus:border-sky-400"
             />
           </div>
           <button
             type="submit"
             disabled={loading}
-            className="px-3 py-1.5 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             Search
           </button>
@@ -189,7 +189,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
                 setSearchInput('');
                 setActiveQuery('');
               }}
-              className="text-xs text-slate-400 hover:text-white whitespace-nowrap shrink-0"
+              className="text-xs text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white whitespace-nowrap shrink-0"
             >
               Clear
             </button>
@@ -199,26 +199,26 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
 
       {/* Macro Market Brief */}
       {newsData?.marketBrief && !error && (
-        <div className="px-6 py-4 border-b border-white/[0.06] bg-[#0C0F14]/40">
-          <div className="text-[11px] font-medium text-[#C9A24D] mb-1">Session Macro Summary</div>
-          <p className="text-xs text-slate-300 leading-relaxed max-w-4xl">{newsData.marketBrief}</p>
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#0B1424]/60">
+          <div className="text-[11px] font-medium text-blue-700 dark:text-sky-400 mb-1">Session Macro Summary</div>
+          <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed max-w-4xl">{newsData.marketBrief}</p>
         </div>
       )}
 
       {/* Body States: Loading / Error / Empty / Populated */}
       {loading && !newsData ? (
-        <div className="divide-y divide-white/[0.06]">
+        <div className="divide-y divide-slate-200 dark:divide-slate-800">
           {[0, 1, 2, 3].map((row) => (
             <div key={row} className="px-6 py-4 space-y-2 animate-pulse">
-              <div className="h-3 w-48 bg-white/[0.06] rounded" />
-              <div className="h-4 w-3/4 bg-white/[0.08] rounded" />
-              <div className="h-3 w-2/3 bg-white/[0.05] rounded" />
+              <div className="h-3 w-48 bg-slate-200 dark:bg-white/[0.06] rounded" />
+              <div className="h-4 w-3/4 bg-slate-200 dark:bg-white/[0.08] rounded" />
+              <div className="h-3 w-2/3 bg-slate-200 dark:bg-white/[0.05] rounded" />
             </div>
           ))}
         </div>
       ) : error ? (
         <div className="px-6 py-8 text-center space-y-3">
-          <div className="inline-flex items-center gap-2 text-xs font-medium text-red-400">
+          <div className="inline-flex items-center gap-2 text-xs font-medium text-rose-700 dark:text-rose-400">
             <AlertTriangle className="w-4 h-4 shrink-0" />
             <span>{error}</span>
           </div>
@@ -226,7 +226,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
             <button
               type="button"
               onClick={() => void loadLiveNews({ forceRefresh: true })}
-              className="px-4 py-2 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-white rounded-lg transition-colors"
+              className="px-4 py-2 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg transition-colors"
             >
               Retry Live Feeds
             </button>
@@ -234,32 +234,32 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
         </div>
       ) : !newsData || newsData.items.length === 0 ? (
         <div className="px-6 py-8 text-center space-y-2">
-          <p className="text-xs font-medium text-slate-300">No live headlines matched this filter.</p>
+          <p className="text-xs font-medium text-slate-700 dark:text-slate-300">No live headlines matched this filter.</p>
           <p className="text-[11px] text-slate-500">
             Try switching market categories or clearing your search query.
           </p>
         </div>
       ) : (
-        <div className="divide-y divide-white/[0.06]">
+        <div className="divide-y divide-slate-200 dark:divide-slate-800">
           {newsData.items.map((item, idx) => {
             const impactColor =
               item.impactDirection === 'BULLISH'
-                ? 'text-emerald-400'
+                ? 'text-emerald-700 dark:text-emerald-400'
                 : item.impactDirection === 'BEARISH'
-                  ? 'text-red-400'
+                  ? 'text-rose-700 dark:text-rose-400'
                   : item.impactDirection === 'VOLATILE'
-                    ? 'text-amber-400'
-                    : 'text-slate-400';
+                    ? 'text-amber-700 dark:text-amber-400'
+                    : 'text-slate-500 dark:text-slate-400';
 
             return (
               <article
                 key={`${item.headline.slice(0, 32)}-${idx}`}
-                className="px-6 py-4 hover:bg-white/[0.02] transition-colors flex flex-col gap-2"
+                className="px-6 py-4 hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors flex flex-col gap-2"
               >
                 {/* Unboxed metadata row with typographic separators */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-400">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-medium text-slate-300">{item.marketScope}</span>
+                    <span className="font-medium text-slate-700 dark:text-slate-300">{item.marketScope}</span>
                     <span aria-hidden="true">·</span>
                     <span className={`font-semibold ${impactColor}`}>
                       {item.impactDirection} ({item.impactLevel})
@@ -276,7 +276,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
                       target="_blank"
                       rel="noopener noreferrer"
                       referrerPolicy="no-referrer"
-                      className="inline-flex items-center gap-1 text-[11px] text-slate-400 hover:text-white transition-colors whitespace-nowrap shrink-0"
+                      className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
                     >
                       <span>Read Source</span>
                       <ExternalLink className="w-3 h-3" />
@@ -285,9 +285,9 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
                 </div>
 
                 {/* Headline & Impact */}
-                <h3 className="text-sm font-semibold text-white leading-snug">{item.headline}</h3>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white leading-snug">{item.headline}</h3>
                 {item.summary && (
-                  <p className="text-xs text-slate-400 leading-relaxed max-w-4xl">{item.summary}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed max-w-4xl">{item.summary}</p>
                 )}
 
                 {/* Affected Asset Terminal Shortcuts */}
@@ -302,7 +302,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
                             key={asset}
                             type="button"
                             onClick={() => onOpenInTerminal(instId)}
-                            className="inline-flex items-center gap-1 text-[11px] font-mono-tabular font-medium text-emerald-400 hover:text-emerald-300 underline underline-offset-4 transition-colors whitespace-nowrap"
+                            className="inline-flex items-center gap-1 text-[11px] font-mono-tabular font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 underline underline-offset-4 transition-colors whitespace-nowrap"
                           >
                             <span>{asset}</span>
                             <ArrowUpRight className="w-3 h-3" />
@@ -312,7 +312,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
                       return (
                         <span
                           key={asset}
-                          className="text-[11px] font-mono-tabular text-slate-400"
+                          className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400"
                         >
                           {asset}
                         </span>
@@ -328,7 +328,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
 
       {/* Grounded Google Search Sources Footer */}
       {newsData && newsData.groundingSources.length > 0 && (
-        <div className="px-6 py-3.5 border-t border-white/[0.06] bg-[#0C0F14]/60 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
+        <div className="px-6 py-3.5 border-t border-slate-200 dark:border-slate-800 bg-slate-50/90 dark:bg-[#0B1424]/60 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11px]">
           <span className="text-slate-500 font-medium whitespace-nowrap">
             Active Free News Feeds:
           </span>
@@ -339,7 +339,7 @@ export const LiveMarketNewsSection: React.FC<LiveMarketNewsSectionProps> = ({
               target="_blank"
               rel="noopener noreferrer"
               referrerPolicy="no-referrer"
-              className="inline-flex items-center gap-1 text-slate-400 hover:text-[#C9A24D] transition-colors truncate max-w-[220px]"
+              className="inline-flex items-center gap-1 text-slate-500 dark:text-slate-400 hover:text-blue-700 dark:hover:text-sky-400 transition-colors truncate max-w-[220px]"
             >
               <span className="truncate">{src.title}</span>
               <ExternalLink className="w-2.5 h-2.5 shrink-0" />

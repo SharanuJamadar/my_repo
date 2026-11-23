@@ -31,6 +31,7 @@ import {
   type TradeMode,
 } from '../types/trading';
 import { PINE_STRATEGY_TEMPLATES } from '../lib/pineTemplates';
+import { useTheme } from '../lib/theme';
 
 interface PineStrategyBotViewProps {
   strategies: PineStrategyRecord[];
@@ -53,6 +54,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
   botLogs,
   killSwitchActive,
 }) => {
+  const { isDark } = useTheme();
   const [selectedId, setSelectedId] = useState<string>(strategies[0]?.id || '');
   const [name, setName] = useState(strategies[0]?.name || PINE_STRATEGY_TEMPLATES[0].name);
   const [description, setDescription] = useState(
@@ -66,8 +68,10 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
   );
   const [quantity, setQuantity] = useState(strategies[0]?.quantity || 2);
   const [initialCapital, setInitialCapital] = useState(strategies[0]?.initialCapital || 100000);
-  const [stopLossPct, setStopLossPct] = useState(strategies[0]?.stopLossPct || 0.45);
-  const [takeProfitPct, setTakeProfitPct] = useState(strategies[0]?.takeProfitPct || 0.9);
+  const [stopLossPct, setStopLossPct] = useState(strategies[0]?.stopLossPct || 0.55);
+  const [takeProfitPct, setTakeProfitPct] = useState(strategies[0]?.takeProfitPct || 1.65);
+  const [riskPerTradePct, setRiskPerTradePct] = useState(strategies[0]?.riskPerTradePct ?? 2.5);
+  const [trailingStop, setTrailingStop] = useState(strategies[0]?.trailingStop ?? true);
   const [executionMode, setExecutionMode] = useState<TradeMode>(
     strategies[0]?.executionMode || 'PAPER'
   );
@@ -104,6 +108,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
     setInitialCapital(s.initialCapital);
     setStopLossPct(s.stopLossPct);
     setTakeProfitPct(s.takeProfitPct);
+    setRiskPerTradePct(s.riskPerTradePct ?? 2.5);
+    setTrailingStop(s.trailingStop ?? true);
     setExecutionMode(s.executionMode);
     setAutoExecute(s.autoExecute);
     setPineCode(s.pineCode);
@@ -121,10 +127,12 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
     setDescription('Custom Pine Script v5 entry & exit rules');
     setInstrumentId('XAUUSD');
     setTimeframe('5m');
-    setQuantity(1);
+    setQuantity(2);
     setInitialCapital(100000);
-    setStopLossPct(0.5);
-    setTakeProfitPct(1.0);
+    setStopLossPct(0.55);
+    setTakeProfitPct(1.65);
+    setRiskPerTradePct(2.5);
+    setTrailingStop(true);
     setExecutionMode('PAPER');
     setAutoExecute(true);
     setPineCode(PINE_STRATEGY_TEMPLATES[0].pineCode);
@@ -141,6 +149,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
     setQuantity(tpl.quantity);
     setStopLossPct(tpl.stopLossPct);
     setTakeProfitPct(tpl.takeProfitPct);
+    setRiskPerTradePct(tpl.riskPerTradePct);
+    setTrailingStop(tpl.trailingStop);
     setPineCode(tpl.pineCode);
   };
 
@@ -173,6 +183,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
         initialCapital,
         stopLossPct,
         takeProfitPct,
+        riskPerTradePct,
+        trailingStop,
         executionMode,
         botEnabled: activeStrategy?.botEnabled ?? false,
         autoExecute,
@@ -200,6 +212,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
           initialCapital,
           stopLossPct,
           takeProfitPct,
+          riskPerTradePct,
+          trailingStop,
         }),
       });
       const json = (await res.json()) as PineBacktestResult;
@@ -233,17 +247,17 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
       width: host.clientWidth,
       height: 360,
       layout: {
-        background: { type: ColorType.Solid, color: '#0C0F14' },
-        textColor: '#94A3B8',
+        background: { type: ColorType.Solid, color: isDark ? '#0B1424' : '#FFFFFF' },
+        textColor: isDark ? '#94A3B8' : '#475569',
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: 'rgba(255,255,255,0.04)' },
-        horzLines: { color: 'rgba(255,255,255,0.04)' },
+        vertLines: { color: isDark ? 'rgba(148,163,184,0.08)' : '#F1F5F9' },
+        horzLines: { color: isDark ? 'rgba(148,163,184,0.08)' : '#F1F5F9' },
       },
-      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
-      timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true },
+      rightPriceScale: { borderColor: isDark ? 'rgba(148,163,184,0.16)' : '#E2E8F0' },
+      timeScale: { borderColor: isDark ? 'rgba(148,163,184,0.16)' : '#E2E8F0', timeVisible: true },
     });
     chartApiRef.current = chart;
 
@@ -348,7 +362,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
       chartApiRef.current = null;
       chart.remove();
     };
-  }, [backtestResult, chartView]);
+  }, [backtestResult, chartView, isDark]);
 
   const runningBotsCount = strategies.filter((s) => s.botEnabled).length;
   const activeCurrency =
@@ -369,6 +383,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             initialCapital,
             stopLossPct,
             takeProfitPct,
+            riskPerTradePct,
+            trailingStop,
             executionMode,
             autoExecute,
           }
@@ -384,6 +400,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             initialCapital,
             stopLossPct,
             takeProfitPct,
+            riskPerTradePct,
+            trailingStop,
             executionMode,
             botEnabled: false,
             autoExecute,
@@ -403,15 +421,14 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <h2 className="text-xl font-semibold text-white">Pine Chart, Strategy Backtest & Bot</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Pine Chart, Strategy Backtest &amp; Bot</h2>
             {runningBotsCount > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                {runningBotsCount} Bot Active
+              <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 font-mono-tabular">
+                · {runningBotsCount} Bot Active
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Write or upload TradingView Pine Script v5 strategies, backtest over real OHLCV candles, and run live automated trade execution bots
           </p>
         </div>
@@ -427,7 +444,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Upload className="w-3.5 h-3.5" />
             Import .pine
@@ -436,7 +453,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
           <button
             type="button"
             onClick={handleCreateBlank}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
           >
             <Plus className="w-3.5 h-3.5" />
             New Strategy
@@ -446,7 +463,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             type="button"
             onClick={handleSave}
             disabled={saving}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-emerald-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-emerald-700 dark:text-emerald-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             <Save className="w-3.5 h-3.5" />
             {saving ? 'Saving...' : 'Save Strategy'}
@@ -465,30 +482,30 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
       </div>
 
       {saveNote && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300">
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-500/10 border border-emerald-200 dark:border-emerald-500/35 rounded-xl text-xs text-emerald-700 dark:text-emerald-300">
           {saveNote}
         </div>
       )}
 
       {killSwitchActive && (
-        <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-xs text-red-300">
+        <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/35 rounded-xl text-xs text-rose-700 dark:text-rose-300">
           Emergency Kill Switch is ACTIVE in Settings. Pine bots can evaluate live candles, but automated order execution is paused until disabled.
         </div>
       )}
 
       {/* Saved Strategies Library Strip */}
-      <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4 space-y-3">
+      <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="text-xs font-semibold text-white">Saved Pine Strategies ({strategies.length})</div>
+          <div className="text-xs font-semibold text-slate-900 dark:text-white">Saved Pine Strategies ({strategies.length})</div>
           <div className="flex items-center gap-2 text-xs">
-            <span className="text-slate-400">Load Template:</span>
+            <span className="text-slate-500 dark:text-slate-400">Load Template:</span>
             <select
               defaultValue=""
               onChange={(e) => {
                 if (e.target.value) handleLoadTemplate(e.target.value);
                 e.target.value = '';
               }}
-              className="bg-[#090B0E] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-slate-200"
+              className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-200"
             >
               <option value="" disabled>
                 Choose Pine v5 starter...
@@ -511,8 +528,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                 key={s.id}
                 className={`p-3 rounded-lg border transition-colors flex flex-col justify-between gap-2.5 ${
                   selected
-                    ? 'bg-emerald-500/[0.07] border-emerald-500/40'
-                    : 'bg-[#090B0E] border-white/[0.06] hover:border-white/[0.14]'
+                    ? 'bg-emerald-500/[0.07] border-emerald-200 dark:border-emerald-500/35'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                 }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -521,8 +538,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                     onClick={() => loadIntoForm(s)}
                     className="text-left min-w-0 flex-1"
                   >
-                    <div className="text-xs font-semibold text-white truncate">{s.name}</div>
-                    <div className="text-[11px] text-slate-400 mt-0.5">
+                    <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">{s.name}</div>
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                       {instMeta?.symbol ?? s.instrumentId} · {s.timeframe.toUpperCase()} · {s.executionMode}
                     </div>
                   </button>
@@ -530,14 +547,14 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                     type="button"
                     onClick={() => onDeleteStrategy(s.id)}
                     aria-label={`Delete ${s.name}`}
-                    className="p-1 text-slate-500 hover:text-red-400 transition-colors shrink-0"
+                    className="p-1 text-slate-500 hover:text-rose-700 dark:hover:text-rose-400 transition-colors shrink-0"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/[0.06]">
-                  <span className="text-[11px] text-slate-400">
+                <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-slate-800">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
                     SL {s.stopLossPct}% · TP {s.takeProfitPct}% · Qty {s.quantity}
                   </span>
                   <button
@@ -546,7 +563,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                     className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-semibold rounded-md transition-colors whitespace-nowrap shrink-0 ${
                       s.botEnabled
                         ? 'bg-emerald-600 text-white'
-                        : 'bg-[#11141A] border border-white/[0.08] text-slate-300 hover:text-white'
+                        : 'bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
                     }`}
                   >
                     {s.botEnabled ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
@@ -562,17 +579,17 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
       {/* Main Split: Pine Editor & Bot Params (5 cols) + Chart & Results (7 cols) */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* Left: Strategy Code & Parameters */}
-        <div className="xl:col-span-5 bg-[#11141A] border border-white/[0.08] rounded-xl p-4 space-y-4">
-          <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+        <div className="xl:col-span-5 bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-200 dark:border-slate-800 pb-3">
             <div className="flex items-center gap-2">
-              <Code2 className="w-4 h-4 text-emerald-400" />
-              <h3 className="text-sm font-semibold text-white">Pine Script & Bot Parameters</h3>
+              <Code2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Pine Script & Bot Parameters</h3>
             </div>
             <button
               type="button"
               onClick={handleRunLiveCheckNow}
               disabled={checkingBot}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-sky-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-blue-700 dark:text-sky-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
             >
               <Bot className="w-3.5 h-3.5" />
               {checkingBot ? 'Evaluating...' : 'Check Live Bar Now'}
@@ -581,20 +598,20 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
             <div className="sm:col-span-2">
-              <label className="block text-slate-400 mb-1">Strategy Name</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Strategy Name</label>
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Market Instrument</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Market Instrument</label>
               <select
                 value={instrumentId}
                 onChange={(e) => setInstrumentId(e.target.value)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
               >
                 {INSTRUMENTS.map((inst) => (
                   <option key={inst.id} value={inst.id}>
@@ -605,11 +622,11 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Timeframe</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Timeframe</label>
               <select
                 value={timeframe}
                 onChange={(e) => setTimeframe(e.target.value as Timeframe)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
               >
                 <option value="5m">5M</option>
                 <option value="15m">15M</option>
@@ -620,81 +637,105 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Order Qty / Units</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Capital Risk / Trade (%)</label>
+              <input
+                type="number"
+                min={0}
+                max={10}
+                step="0.25"
+                value={riskPerTradePct}
+                onChange={(e) => setRiskPerTradePct(Number(e.target.value))}
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 font-mono-tabular text-slate-900 dark:text-white"
+              />
+              <span className="text-[10px] text-slate-500">0 = fixed qty · 2.5% = dynamic capital sizing</span>
+            </div>
+
+            <div>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Manual Fallback Qty</label>
               <input
                 type="number"
                 min={0.01}
                 step="0.1"
                 value={quantity}
                 onChange={(e) => setQuantity(Number(e.target.value))}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 font-mono-tabular text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 font-mono-tabular text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Backtest Capital</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Backtest Capital</label>
               <input
                 type="number"
                 min={100}
                 step="1000"
                 value={initialCapital}
                 onChange={(e) => setInitialCapital(Number(e.target.value))}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 font-mono-tabular text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 font-mono-tabular text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Stop Loss (%)</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Stop Loss (%)</label>
               <input
                 type="number"
                 min={0.05}
                 step="0.05"
                 value={stopLossPct}
                 onChange={(e) => setStopLossPct(Number(e.target.value))}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 font-mono-tabular text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 font-mono-tabular text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Take Profit (%)</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Take Profit (%)</label>
               <input
                 type="number"
                 min={0.05}
                 step="0.05"
                 value={takeProfitPct}
                 onChange={(e) => setTakeProfitPct(Number(e.target.value))}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 font-mono-tabular text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 font-mono-tabular text-slate-900 dark:text-white"
               />
             </div>
 
             <div>
-              <label className="block text-slate-400 mb-1">Bot Execution Mode</label>
+              <label className="block text-slate-500 dark:text-slate-400 mb-1">Bot Execution Mode</label>
               <select
                 value={executionMode}
                 onChange={(e) => setExecutionMode(e.target.value as TradeMode)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-white"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-slate-900 dark:text-white"
               >
                 <option value="PAPER">Paper Trading Engine</option>
                 <option value="LIVE">Live Broker Adapter</option>
               </select>
             </div>
 
-            <label className="flex items-center justify-between gap-2 p-2.5 bg-[#090B0E] border border-white/[0.06] rounded-lg cursor-pointer self-end">
-              <span className="text-xs text-slate-200">Auto-Execute Bot Signals</span>
+            <label className="flex items-center justify-between gap-2 p-2.5 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer self-end">
+              <span className="text-xs text-slate-800 dark:text-slate-200">3-TP Stepped SL Trailing</span>
+              <input
+                type="checkbox"
+                checked={trailingStop}
+                onChange={(e) => setTrailingStop(e.target.checked)}
+                className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0E182A] text-emerald-500"
+              />
+            </label>
+
+            <label className="flex items-center justify-between gap-2 p-2.5 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg cursor-pointer self-end">
+              <span className="text-xs text-slate-800 dark:text-slate-200">Auto-Execute Bot Signals</span>
               <input
                 type="checkbox"
                 checked={autoExecute}
                 onChange={(e) => setAutoExecute(e.target.checked)}
-                className="rounded border-slate-600 bg-[#11141A] text-emerald-500"
+                className="rounded border-slate-300 dark:border-slate-700 bg-white dark:bg-[#0E182A] text-emerald-500"
               />
             </label>
           </div>
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <label className="text-slate-400">Pine Script v5 Source Code</label>
+              <label className="text-slate-500 dark:text-slate-400">Pine Script v5 Source Code</label>
               <span className="text-[11px] text-slate-500 font-mono-tabular">
-                Supports ta.ema, ta.sma, ta.rsi, ta.macd, ta.vwap, ta.crossover/under
+                Supports ta.ema, ta.sma, ta.rsi, ta.macd, ta.adx, ta.supertrend, ta.bb, ta.vwap, ta.rising/falling
               </span>
             </div>
             <textarea
@@ -702,34 +743,34 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
               onChange={(e) => setPineCode(e.target.value)}
               rows={15}
               spellCheck={false}
-              className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg p-3 font-mono-tabular text-[12px] leading-relaxed text-emerald-200 focus:outline-none focus:border-emerald-500"
+              className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-3 font-mono-tabular text-[12px] leading-relaxed text-emerald-800 dark:text-emerald-200 focus:outline-none focus:border-emerald-500"
             />
           </div>
         </div>
 
         {/* Right: Interactive Pine Chart, Backtest Metrics & Trade Ledger */}
         <div className="xl:col-span-7 space-y-5">
-          <div className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
+          <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="text-sm font-semibold text-white">
+                <div className="text-sm font-semibold text-slate-900 dark:text-white">
                   {backtestResult?.instrument.symbol ?? instrumentId} · Pine Chart & Signal Markers
                 </div>
-                <p className="text-xs text-slate-400">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   {backtestResult?.available
                     ? `${backtestResult.provider} · ${backtestResult.candlesCount} historical candles (${backtestResult.timeframe.toUpperCase()})`
                     : 'Click Run Backtest to evaluate over live historical OHLCV bars'}
                 </p>
               </div>
 
-              <div className="flex items-center bg-[#090B0E] border border-white/[0.08] rounded-lg p-0.5">
+              <div className="flex items-center bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
                 <button
                   type="button"
                   onClick={() => setChartView('PINE_CHART')}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                     chartView === 'PINE_CHART'
                       ? 'bg-emerald-600 text-white'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   Candles + Signals
@@ -740,7 +781,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                     chartView === 'EQUITY_CURVE'
                       ? 'bg-emerald-600 text-white'
-                      : 'text-slate-400 hover:text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   Equity Curve
@@ -749,15 +790,15 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             </div>
 
             {backtestError ? (
-              <div className="h-[360px] flex items-center justify-center p-6 text-center text-xs text-amber-300 bg-[#0C0F14]">
+              <div className="h-[360px] flex items-center justify-center p-6 text-center text-xs text-amber-700 dark:text-amber-300 bg-white dark:bg-[#0B1424]">
                 {backtestError}
               </div>
             ) : backtesting && !backtestResult ? (
-              <div className="h-[360px] flex items-center justify-center text-xs text-slate-400 bg-[#0C0F14]">
+              <div className="h-[360px] flex items-center justify-center text-xs text-slate-500 dark:text-slate-400 bg-white dark:bg-[#0B1424]">
                 Compiling Pine Script and running bar-by-bar simulation...
               </div>
             ) : (
-              <div ref={chartHostRef} className="w-full h-[360px] bg-[#0C0F14]" />
+              <div ref={chartHostRef} className="w-full h-[360px] bg-white dark:bg-[#0B1424]" />
             )}
           </div>
 
@@ -765,11 +806,11 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             <>
               {/* Backtest KPI Summary */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400">Net Profit</div>
+                <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Net Profit</div>
                   <div
                     className={`font-mono-tabular text-sm font-bold mt-1 ${
-                      backtestResult.metrics.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'
+                      backtestResult.metrics.netProfit >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                     }`}
                   >
                     {backtestResult.metrics.netProfit >= 0 ? '+' : ''}
@@ -777,66 +818,70 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                     {backtestResult.metrics.netProfit.toLocaleString()}
                   </div>
                 </div>
-                <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400">Return %</div>
+                <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Return %</div>
                   <div
                     className={`font-mono-tabular text-sm font-bold mt-1 ${
-                      backtestResult.metrics.netProfitPct >= 0 ? 'text-emerald-400' : 'text-red-400'
+                      backtestResult.metrics.netProfitPct >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                     }`}
                   >
                     {backtestResult.metrics.netProfitPct >= 0 ? '+' : ''}
                     {backtestResult.metrics.netProfitPct}%
                   </div>
                 </div>
-                <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400">Win Rate</div>
-                  <div className="font-mono-tabular text-sm font-bold text-white mt-1">
+                <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Win Rate</div>
+                  <div className="font-mono-tabular text-sm font-bold text-slate-900 dark:text-white mt-1">
                     {backtestResult.metrics.winRatePct}%
                   </div>
                 </div>
-                <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400">Profit Factor</div>
-                  <div className="font-mono-tabular text-sm font-bold text-sky-300 mt-1">
+                <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Profit Factor</div>
+                  <div className="font-mono-tabular text-sm font-bold text-blue-700 dark:text-sky-300 mt-1">
                     {backtestResult.metrics.profitFactor}
                   </div>
                 </div>
-                <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400">Max Drawdown</div>
-                  <div className="font-mono-tabular text-sm font-bold text-amber-300 mt-1">
+                <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Max Drawdown</div>
+                  <div className="font-mono-tabular text-sm font-bold text-amber-700 dark:text-amber-300 mt-1">
                     {backtestResult.metrics.maxDrawdownPct}%
                   </div>
                 </div>
-                <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-3">
-                  <div className="text-[11px] text-slate-400">Total Trades</div>
-                  <div className="font-mono-tabular text-sm font-bold text-white mt-1">
+                <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-3">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">Total Trades</div>
+                  <div className="font-mono-tabular text-sm font-bold text-slate-900 dark:text-white mt-1">
                     {backtestResult.metrics.totalTrades}
                   </div>
                 </div>
               </div>
 
               {/* Parsed Pine Rules Transparency */}
-              <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4 space-y-2 text-xs">
+              <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-2 text-xs">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-semibold text-white">
+                  <span className="font-semibold text-slate-900 dark:text-white">
                     Parsed Pine Rules ({backtestResult.parsed.pineVersion})
                   </span>
-                  <span className="text-[11px] text-slate-400 font-mono-tabular">
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-tabular">
                     Indicators:{' '}
                     {backtestResult.parsed.indicatorsDetected.length > 0
                       ? backtestResult.parsed.indicatorsDetected.join(', ')
                       : 'Price Action / Default EMA'}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-slate-300">
-                  <div className="bg-[#090B0E] border border-white/[0.06] rounded-lg p-2.5 font-mono-tabular truncate">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px] text-slate-700 dark:text-slate-300">
+                  <div className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 font-mono-tabular truncate">
                     LONG: {backtestResult.parsed.buyRuleSummary}
                   </div>
-                  <div className="bg-[#090B0E] border border-white/[0.06] rounded-lg p-2.5 font-mono-tabular truncate">
+                  <div className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 font-mono-tabular truncate">
                     SHORT: {backtestResult.parsed.sellRuleSummary}
                   </div>
                 </div>
+                <div className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-2.5 text-[11px] text-slate-500 dark:text-slate-400 leading-relaxed">
+                  3-TP Stepped Trailing Engine: Uses {riskPerTradePct > 0 ? `${riskPerTradePct}% capital risk per trade` : `fixed ${quantity} qty`} across TP1, TP2, and TP3
+                  {trailingStop ? ' — hitting TP1 trails SL to Entry (+BE), hitting TP2 trails SL to TP1, and hitting TP3 books full target profit' : ''}. Actual live results vary with market volatility and are never guaranteed.
+                </div>
                 {backtestResult.parsed.unsupportedConstructs.length > 0 && (
-                  <div className="text-[11px] text-amber-300">
+                  <div className="text-[11px] text-amber-700 dark:text-amber-300">
                     Note: {backtestResult.parsed.unsupportedConstructs.join(' · ')}
                   </div>
                 )}
@@ -845,16 +890,16 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
           )}
 
           {/* Backtest Trades Ledger & Live Bot Execution Logs */}
-          <div className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-1 bg-[#090B0E] border border-white/[0.08] rounded-lg p-0.5">
+          <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-1 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
                 <button
                   type="button"
                   onClick={() => setLedgerTab('BACKTEST_TRADES')}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                     ledgerTab === 'BACKTEST_TRADES'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   Backtest Trades ({backtestResult?.trades.length ?? 0})
@@ -864,8 +909,8 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                   onClick={() => setLedgerTab('BOT_LOGS')}
                   className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                     ledgerTab === 'BOT_LOGS'
-                      ? 'bg-slate-800 text-white'
-                      : 'text-slate-400 hover:text-white'
+                      ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                      : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
                   Live Bot Log ({botLogs.length})
@@ -876,48 +921,65 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             {ledgerTab === 'BACKTEST_TRADES' ? (
               <div className="overflow-x-auto max-h-72 overflow-y-auto">
                 <table className="w-full text-left border-collapse text-xs">
-                  <thead className="sticky top-0 bg-[#11141A] border-b border-white/[0.06] text-[11px] text-slate-400">
+                  <thead className="sticky top-0 bg-white dark:bg-[#0E182A] border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                     <tr>
                       <th className="py-2 px-3 font-medium">Side</th>
                       <th className="py-2 px-3 font-medium">Entry Time</th>
-                      <th className="py-2 px-3 font-medium text-right">Entry</th>
-                      <th className="py-2 px-3 font-medium text-right">Exit</th>
-                      <th className="py-2 px-3 font-medium">Reason</th>
-                      <th className="py-2 px-3 font-medium text-right">Net P&L</th>
+                      <th className="py-2 px-3 font-medium text-right">Entry / Exit</th>
+                      <th className="py-2 px-3 font-medium text-right">TP1 · TP2 · TP3</th>
+                      <th className="py-2 px-3 font-medium">Exit / Trail Stage</th>
+                      <th className="py-2 px-3 font-medium text-right">Net P&amp;L</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.06]">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {!backtestResult?.trades.length ? (
                       <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-400">
+                        <td colSpan={6} className="py-8 text-center text-slate-500 dark:text-slate-400">
                           No historical triggers fired on the current candle window. Adjust Pine conditions or SL/TP parameters.
                         </td>
                       </tr>
                     ) : (
                       [...backtestResult.trades].reverse().map((t) => (
-                        <tr key={t.id} className="hover:bg-white/[0.02]">
+                        <tr key={t.id} className="hover:bg-slate-100 dark:hover:bg-white/[0.06]">
                           <td
                             className={`py-2 px-3 font-semibold ${
-                              t.side === 'BUY' ? 'text-emerald-400' : 'text-red-400'
+                              t.side === 'BUY' ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                             }`}
                           >
                             {t.side}
                           </td>
-                          <td className="py-2 px-3 font-mono-tabular text-slate-300">
+                          <td className="py-2 px-3 font-mono-tabular text-slate-700 dark:text-slate-300">
                             {new Date(t.entryTime * 1000).toLocaleString()}
                           </td>
-                          <td className="py-2 px-3 text-right font-mono-tabular text-white">
-                            {t.entryPrice}
+                          <td className="py-2 px-3 text-right font-mono-tabular text-slate-900 dark:text-white">
+                            <div>{t.entryPrice}</div>
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">→ {t.exitPrice}</div>
                           </td>
-                          <td className="py-2 px-3 text-right font-mono-tabular text-white">
-                            {t.exitPrice}
+                          <td className="py-2 px-3 text-right font-mono-tabular text-[10px] text-slate-500 dark:text-slate-400">
+                            {t.tp1Price ? (
+                              <>
+                                <div className="text-emerald-700 dark:text-emerald-300">
+                                  {t.tp1Price} · {t.tp2Price}
+                                </div>
+                                <div className="text-blue-700 dark:text-sky-400">
+                                  T3 {t.tp3Price} · SL {t.trailedStopLoss}
+                                </div>
+                              </>
+                            ) : (
+                              '—'
+                            )}
                           </td>
-                          <td className="py-2 px-3 text-[11px] text-slate-400">
-                            {t.exitReason.replace('_', ' ')}
+                          <td className="py-2 px-3 text-[11px] text-slate-700 dark:text-slate-300">
+                            <div>{t.exitReason.replaceAll('_', ' ')}</div>
+                            {t.tpReached !== undefined && (
+                              <div className="text-[10px] text-emerald-700 dark:text-emerald-400 font-mono-tabular">
+                                TP {t.tpReached}/3 reached
+                              </div>
+                            )}
                           </td>
                           <td
                             className={`py-2 px-3 text-right font-mono-tabular font-semibold ${
-                              t.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
+                              t.pnl >= 0 ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                             }`}
                           >
                             {t.pnl >= 0 ? '+' : ''}
@@ -932,7 +994,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
             ) : (
               <div className="overflow-x-auto max-h-72 overflow-y-auto">
                 <table className="w-full text-left border-collapse text-xs">
-                  <thead className="sticky top-0 bg-[#11141A] border-b border-white/[0.06] text-[11px] text-slate-400">
+                  <thead className="sticky top-0 bg-white dark:bg-[#0E182A] border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                     <tr>
                       <th className="py-2 px-3 font-medium">Time</th>
                       <th className="py-2 px-3 font-medium">Strategy · Market</th>
@@ -941,43 +1003,43 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
                       <th className="py-2 px-3 font-medium">Execution Detail</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-white/[0.06]">
+                  <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                     {botLogs.length === 0 ? (
                       <tr>
-                        <td colSpan={5} className="py-8 text-center text-slate-400">
+                        <td colSpan={5} className="py-8 text-center text-slate-500 dark:text-slate-400">
                           Click &ldquo;Start Bot&rdquo; on any Pine strategy or &ldquo;Check Live Bar Now&rdquo; to evaluate real-time candles.
                         </td>
                       </tr>
                     ) : (
                       botLogs.map((log) => (
-                        <tr key={log.id} className="hover:bg-white/[0.02]">
-                          <td className="py-2 px-3 font-mono-tabular text-slate-400 whitespace-nowrap">
+                        <tr key={log.id} className="hover:bg-slate-100 dark:hover:bg-white/[0.06]">
+                          <td className="py-2 px-3 font-mono-tabular text-slate-500 dark:text-slate-400 whitespace-nowrap">
                             {new Date(log.timestamp).toLocaleTimeString()}
                           </td>
-                          <td className="py-2 px-3 text-white">
+                          <td className="py-2 px-3 text-slate-900 dark:text-white">
                             <div className="font-medium truncate max-w-[180px]">{log.strategyName}</div>
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
                               {log.instrumentSymbol} · {log.timeframe.toUpperCase()}
                             </div>
                           </td>
                           <td
                             className={`py-2 px-3 font-semibold ${
                               log.action === 'BUY'
-                                ? 'text-emerald-400'
+                                ? 'text-emerald-700 dark:text-emerald-400'
                                 : log.action === 'SELL'
-                                  ? 'text-red-400'
+                                  ? 'text-rose-700 dark:text-rose-400'
                                   : log.action === 'ERROR'
-                                    ? 'text-amber-400'
-                                    : 'text-slate-400'
+                                    ? 'text-amber-700 dark:text-amber-400'
+                                    : 'text-slate-500 dark:text-slate-400'
                             }`}
                           >
                             {log.action}
                             {log.executed ? ' · SENT' : ''}
                           </td>
-                          <td className="py-2 px-3 text-right font-mono-tabular text-white">
+                          <td className="py-2 px-3 text-right font-mono-tabular text-slate-900 dark:text-white">
                             {log.price ? log.price.toLocaleString() : '—'}
                           </td>
-                          <td className="py-2 px-3 text-[11px] text-slate-300 max-w-[260px] truncate">
+                          <td className="py-2 px-3 text-[11px] text-slate-700 dark:text-slate-300 max-w-[260px] truncate">
                             {log.detail}
                           </td>
                         </tr>

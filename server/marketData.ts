@@ -10,6 +10,8 @@ import { computeLevels, computeTechnicals } from './strategyEngine.ts';
 interface RawMarketData {
   candles: CandleBar[];
   price: number;
+  bid?: number;
+  ask?: number;
   open: number;
   high: number;
   low: number;
@@ -98,7 +100,9 @@ async function fetchWithTimeout(url: string, timeoutMs = 6000): Promise<Response
   }
 }
 
-async function fetchSwissquoteSpot(pair: string): Promise<number | null> {
+async function fetchSwissquoteSpot(
+  pair: string
+): Promise<{ mid: number; bid: number; ask: number } | null> {
   try {
     const res = await fetchWithTimeout(
       `https://forex-data-feed.swissquote.com/public-quotes/bboquotes/instrument/${pair}`,
@@ -107,13 +111,34 @@ async function fetchSwissquoteSpot(pair: string): Promise<number | null> {
     if (!res.ok) return null;
     const json = (await res.json()) as any[];
     const spread = json?.[0]?.spreadProfilePrices?.[0];
-    if (spread && typeof spread.bid === 'number' && typeof spread.ask === 'number') {
-      return Number(((spread.bid + spread.ask) / 2).toFixed(4));
+    if (spread && typeof spread.bid === 'number' && typeof spread.ask === 'number' && spread.ask >= spread.bid) {
+      return {
+        mid: Number(((spread.bid + spread.ask) / 2).toFixed(4)),
+        bid: Number(spread.bid.toFixed(4)),
+        ask: Number(spread.ask.toFixed(4)),
+      };
     }
     return null;
   } catch {
     return null;
   }
+}
+
+export function estimateSegmentSpreadBps(instrument: InstrumentMeta): number {
+  if (instrument.binanceSymbol) return 2.5; // 0.025% crypto perpetual BBO
+  if (instrument.swissquotePair) {
+    if (instrument.id === 'EURUSD' || instrument.id === 'USDJPY' || instrument.id === 'GBPUSD') {
+      return 1.2; // 1.2 bps (~1.2 pips on majors)
+    }
+    return 4.5; // Spot metals (~$0.12-$0.25 on Gold)
+  }
+  if (instrument.id === 'NAS100' || instrument.id === 'SPX500' || instrument.id === 'US30') {
+    return 2.0; // US E-mini futures tight spread
+  }
+  if (instrument.segment === 'INDIAN') {
+    return instrument.id === 'NIFTY50' || instrument.id === 'BANKNIFTY' ? 2.5 : 4.5;
+  }
+  return 5.0; // MCX & energy futures
 }
 
 async function fetchBinanceSpotPrice(symbol: string): Promise<number | null> {
@@ -174,12 +199,20 @@ async function fetchYahooFastSpot(yahooSymbol: string): Promise<number | null> {
 async function patchCachedSpotPrice(instrument: InstrumentMeta, entry: CachedRaw): Promise<void> {
   entry.spotCheckedAt = Date.now();
   let spotPrice: number | null = null;
+  let spotBid: number | undefined;
+  let spotAsk: number | undefined;
+
   if (instrument.binanceSymbol) {
     spotPrice = await fetchBinanceSpotPrice(instrument.binanceSymbol);
   } else if (instrument.binanceFuturesSymbol) {
     spotPrice = await fetchBinanceFuturesPrice(instrument.binanceFuturesSymbol);
   } else if (instrument.swissquotePair) {
-    spotPrice = await fetchSwissquoteSpot(instrument.swissquotePair);
+    const sq = await fetchSwissquoteSpot(instrument.swissquotePair);
+    if (sq) {
+      spotPrice = sq.mid;
+      spotBid = sq.bid;
+      spotAsk = sq.ask;
+    }
   } else {
     spotPrice = await fetchYahooFastSpot(instrument.yahooSymbol);
   }
@@ -208,6 +241,8 @@ async function patchCachedSpotPrice(instrument: InstrumentMeta, entry: CachedRaw
     ...entry.data,
     candles: nextCandles,
     price: spotPrice,
+    bid: spotBid ?? entry.data.bid,
+    ask: spotAsk ?? entry.data.ask,
     high: Math.max(entry.data.high, spotPrice),
     low: Math.min(entry.data.low, spotPrice),
     change,
@@ -495,13 +530,17 @@ async function fetchYahooMarket(
         segment === 'MCX'
           ? `Live Benchmark (${yahooSymbol})`
           : `Yahoo Live (${yahooSymbol})`;
+      let bboBid: number | undefined;
+      let bboAsk: number | undefined;
       if (swissquotePair && (segment === 'INTERNATIONAL' || yahooSymbol === 'GC=F' || yahooSymbol === 'SI=F')) {
-        const sqPrice = await fetchSwissquoteSpot(swissquotePair);
-        if (sqPrice && Math.abs(sqPrice - price) / price < 0.05) {
-          price = sqPrice;
-          latest.close = sqPrice;
-          latest.high = Math.max(latest.high, sqPrice);
-          latest.low = Math.min(latest.low, sqPrice);
+        const sq = await fetchSwissquoteSpot(swissquotePair);
+        if (sq && Math.abs(sq.mid - price) / price < 0.05) {
+          price = sq.mid;
+          bboBid = sq.bid;
+          bboAsk = sq.ask;
+          latest.close = sq.mid;
+          latest.high = Math.max(latest.high, sq.mid);
+          latest.low = Math.min(latest.low, sq.mid);
           providerLabel = `Live Spot (${swissquotePair} + ${yahooSymbol})`;
         }
       }
@@ -526,6 +565,8 @@ async function fetchYahooMarket(
       return {
         candles,
         price,
+        bid: bboBid,
+        ask: bboAsk,
         open,
         high,
         low,
@@ -777,6 +818,21 @@ export async function fetchLiveMarketQuote(
     technicals.atr ?? raw.price * 0.004
   );
 
+  // Derive exact Bid / Ask / Spread (preferring live Swissquote BBO, fallback to calibrated segment spread)
+  const decimals = raw.price > 500 ? 2 : 4;
+  const fallbackBps = estimateSegmentSpreadBps(instrument);
+  const halfSpread = (raw.price * (fallbackBps / 10_000)) / 2;
+  const bid =
+    typeof raw.bid === 'number' && raw.bid > 0 && raw.bid <= raw.price * 1.01
+      ? Number(raw.bid.toFixed(decimals))
+      : Number((raw.price - halfSpread).toFixed(decimals));
+  const ask =
+    typeof raw.ask === 'number' && raw.ask >= bid
+      ? Number(raw.ask.toFixed(decimals))
+      : Number((raw.price + halfSpread).toFixed(decimals));
+  const spread = Number(Math.max(0, ask - bid).toFixed(decimals));
+  const spreadBps = raw.price > 0 ? Number(((spread / raw.price) * 10_000).toFixed(2)) : fallbackBps;
+
   return {
     instrument,
     available: true,
@@ -786,6 +842,10 @@ export async function fetchLiveMarketQuote(
     marketTimestamp: new Date(lastCandle.time * 1000).toISOString(),
     timeframe,
     price: Number(raw.price.toFixed(4)),
+    bid,
+    ask,
+    spread,
+    spreadBps,
     open: Number(raw.open.toFixed(4)),
     high: Number(raw.high.toFixed(4)),
     low: Number(raw.low.toFixed(4)),

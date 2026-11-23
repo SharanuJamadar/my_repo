@@ -17,6 +17,7 @@ import {
   type AccountProfileSettings,
   type Timeframe,
 } from '../types/trading';
+import { ExnessGuidePanel } from './ExnessGuidePanel';
 
 interface AccountOnboardingViewProps {
   isSignedIn: boolean;
@@ -64,10 +65,12 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
 
   // Trading App state
   const [selectedBrokerId, setSelectedBrokerId] = useState<string>(() => {
-    const matched = REAL_BROKERS.find((b) =>
-      currentBrokerLabel.toLowerCase().includes(b.name.toLowerCase())
+    const matched = REAL_BROKERS.find(
+      (b) =>
+        currentBrokerLabel.toLowerCase().includes(b.id.toLowerCase()) ||
+        currentBrokerLabel.toLowerCase().includes(b.name.toLowerCase())
     );
-    return matched?.id ?? REAL_BROKERS[0].id;
+    return matched?.id ?? 'EXNESS';
   });
   const [brokerAlias, setBrokerAlias] = useState('');
 
@@ -171,18 +174,18 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#090B0E] text-[#E6EDF3] flex flex-col">
+    <div className="min-h-screen bg-[#F4F6FA] dark:bg-[#08101E] text-slate-900 dark:text-slate-100 flex flex-col">
       {/* Top Bar */}
-      <header className="h-16 border-b border-white/[0.08] bg-[#0C0F14] px-6 lg:px-10 flex items-center justify-between gap-8">
+      <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424] px-6 lg:px-10 flex items-center justify-between gap-8">
         <button
           type="button"
           onClick={onBackToLanding}
-          className="font-classic-serif text-xl font-semibold tracking-tight text-white whitespace-nowrap shrink-0"
+          className="font-classic-serif text-xl font-semibold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
         >
           My Trade
         </button>
 
-        <div className="hidden sm:flex items-center gap-4 text-xs text-slate-400">
+        <div className="hidden sm:flex items-center gap-4 text-xs text-slate-500 dark:text-slate-400">
           {isSignedIn ? (
             <span>Signed in as {userEmail}</span>
           ) : (
@@ -194,7 +197,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
           <button
             type="button"
             onClick={onBackToLanding}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             Landing Page
@@ -203,7 +206,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
             <button
               type="button"
               onClick={() => void onSignOut()}
-              className="px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-white whitespace-nowrap"
+              className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white whitespace-nowrap"
             >
               Sign Out
             </button>
@@ -215,11 +218,11 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
       <main className="flex-1 flex items-center justify-center px-6 py-10">
         <div className="w-full max-w-4xl space-y-8">
           <div className="space-y-2 text-center max-w-2xl mx-auto">
-            <div className="text-xs font-medium text-[#C9A24D]">Account Access Setup</div>
-            <h1 className="font-classic-serif text-3xl sm:text-4xl font-semibold text-white tracking-tight text-balance">
+            <div className="text-xs font-medium text-blue-700 dark:text-sky-400">Account Access Setup</div>
+            <h1 className="font-classic-serif text-3xl sm:text-4xl font-semibold text-slate-900 dark:text-white tracking-tight text-balance">
               Choose how you would like to trade with My Trade
             </h1>
-            <p className="text-sm text-slate-400">
+            <p className="text-sm text-slate-500 dark:text-slate-400">
               Connect an existing brokerage app or create a personal Demo Account before entering
               the main landing page and trading desk.
             </p>
@@ -236,23 +239,23 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
               className={`p-6 rounded-xl border text-left transition-all flex flex-col justify-between gap-5 ${
                 selectedPath === 'BROKER'
                   ? 'bg-sky-500/[0.08] border-sky-400/50'
-                  : 'bg-[#11141A] border-white/[0.08] hover:border-white/25'
+                  : 'bg-white dark:bg-[#0E182A] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
               }`}
             >
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <Link2 className="w-5 h-5 text-sky-400" />
-                  <span className="text-xs font-medium text-sky-300">Brokerage Integration</span>
+                  <Link2 className="w-5 h-5 text-blue-700 dark:text-sky-400" />
+                  <span className="text-xs font-medium text-blue-700 dark:text-sky-300">Brokerage Integration</span>
                 </div>
-                <h2 className="text-lg font-semibold text-white">Connect Trading App</h2>
-                <p className="text-xs text-slate-400 leading-relaxed">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Connect Trading App</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Link Groww, Exness, Upstox, Zerodha Kite, Dhan, Angel One, or Binance to route
                   supported instruments directly from your My Trade workspace.
                 </p>
               </div>
-              <div className="flex items-center justify-between text-xs font-semibold text-white pt-3 border-t border-white/[0.06]">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-900 dark:text-white pt-3 border-t border-slate-200 dark:border-slate-800">
                 <span>{selectedPath === 'BROKER' ? 'Selected — Configure Below' : 'Choose Trading App'}</span>
-                <ArrowRight className="w-4 h-4 text-sky-400" />
+                <ArrowRight className="w-4 h-4 text-blue-700 dark:text-sky-400" />
               </div>
             </button>
 
@@ -264,24 +267,24 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
               }}
               className={`p-6 rounded-xl border text-left transition-all flex flex-col justify-between gap-5 ${
                 selectedPath === 'DEMO'
-                  ? 'bg-[#C9A24D]/[0.09] border-[#C9A24D]/60'
-                  : 'bg-[#11141A] border-white/[0.08] hover:border-white/25'
+                  ? 'bg-blue-700 dark:bg-sky-500/[0.09] border-blue-500 dark:border-sky-400'
+                  : 'bg-white dark:bg-[#0E182A] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
               }`}
             >
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between">
-                  <UserPlus className="w-5 h-5 text-[#C9A24D]" />
-                  <span className="text-xs font-medium text-[#C9A24D]">Paper Trading Desk</span>
+                  <UserPlus className="w-5 h-5 text-blue-700 dark:text-sky-400" />
+                  <span className="text-xs font-medium text-blue-700 dark:text-sky-400">Paper Trading Desk</span>
                 </div>
-                <h2 className="text-lg font-semibold text-white">Create Demo Account</h2>
-                <p className="text-xs text-slate-400 leading-relaxed">
+                <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Create Demo Account</h2>
+                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
                   Register a new Demo Account using your full name, mobile number, and email to
                   test strategies, Pine bots, and live P&amp;L simulations safely.
                 </p>
               </div>
-              <div className="flex items-center justify-between text-xs font-semibold text-white pt-3 border-t border-white/[0.06]">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-900 dark:text-white pt-3 border-t border-slate-200 dark:border-slate-800">
                 <span>{selectedPath === 'DEMO' ? 'Selected — Enter Details Below' : 'Register Demo Account'}</span>
-                <ArrowRight className="w-4 h-4 text-[#C9A24D]" />
+                <ArrowRight className="w-4 h-4 text-blue-700 dark:text-sky-400" />
               </div>
             </button>
           </div>
@@ -290,12 +293,12 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
           {selectedPath === 'BROKER' && (
             <form
               onSubmit={handleConfirmBroker}
-              className="bg-[#11141A] border border-white/[0.1] rounded-xl p-6 space-y-5"
+              className="bg-white dark:bg-[#0E182A] border border-slate-300 dark:border-slate-700 rounded-xl p-6 space-y-5"
             >
-              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/[0.08] pb-4">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-base font-semibold text-white">Select Your Trading App</h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">Select Your Trading App</h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                     Pick a broker platform below to bind your execution profile.
                   </p>
                 </div>
@@ -304,7 +307,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                     href={selectedBroker.portalUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-sky-300 rounded-lg whitespace-nowrap"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-blue-700 dark:text-sky-300 rounded-lg whitespace-nowrap"
                   >
                     Open {selectedBroker.name} Portal
                     <ExternalLink className="w-3.5 h-3.5" />
@@ -323,21 +326,21 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                       onClick={() => setSelectedBrokerId(app.id)}
                       className={`p-3.5 rounded-lg border text-left transition-colors ${
                         active
-                          ? 'bg-sky-500/10 border-sky-400/50'
-                          : 'bg-[#090B0E] border-white/[0.08] hover:border-white/20'
+                          ? 'bg-blue-50 dark:bg-sky-500/10 border-sky-400/50'
+                          : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-white">{app.name}</span>
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white">{app.name}</span>
                         <span
                           className={`text-[11px] font-medium ${
-                            liveReady ? 'text-emerald-400' : 'text-sky-300'
+                            liveReady ? 'text-emerald-700 dark:text-emerald-400' : 'text-blue-700 dark:text-sky-300'
                           }`}
                         >
                           {liveReady ? 'Live Ready' : 'Paper-Linked'}
                         </span>
                       </div>
-                      <div className="text-[11px] text-slate-400 mt-1 truncate">{app.markets}</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">{app.markets}</div>
                     </button>
                   );
                 })}
@@ -345,7 +348,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>
-                  <label className="block text-slate-400 mb-1">
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1">
                     Desk / Account Alias (Optional)
                   </label>
                   <input
@@ -354,32 +357,36 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                     value={brokerAlias}
                     onChange={(e) => setBrokerAlias(e.target.value)}
                     placeholder={`e.g. ${selectedBroker.name} Primary Desk`}
-                    className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-sky-400"
+                    className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2.5 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-sky-400"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 mb-1">Trader Name (Optional)</label>
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1">Trader Name (Optional)</label>
                   <input
                     type="text"
                     maxLength={100}
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     placeholder="Your display name"
-                    className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-sky-400"
+                    className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2.5 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-sky-400"
                   />
                 </div>
               </div>
 
-              <div className="flex items-start gap-2.5 text-xs text-slate-400 bg-[#090B0E] border border-white/[0.06] rounded-lg p-3.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>
-                  {hasServerCredentials
-                    ? `${selectedBroker.name} server credentials (${selectedBroker.envHint}) are verified on this server.`
-                    : `No broker API secrets are stored in browser inputs. Connecting binds ${selectedBroker.name} in Paper-Linked mode until ${selectedBroker.envHint} is added on the server.`}
-                </span>
-              </div>
+              {selectedBroker.id === 'EXNESS' ? (
+                <ExnessGuidePanel compact />
+              ) : (
+                <div className="flex items-start gap-2.5 text-xs text-slate-500 dark:text-slate-400 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-3.5">
+                  <ShieldCheck className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0 mt-0.5" />
+                  <span>
+                    {hasServerCredentials
+                      ? `${selectedBroker.name} server credentials (${selectedBroker.envHint}) are verified on this server.`
+                      : `No broker API secrets are stored in browser inputs. Add ${selectedBroker.envHint} in server Settings → Secrets to enable live order routing.`}
+                  </span>
+                </div>
+              )}
 
-              {error && <div className="text-xs text-red-400">{error}</div>}
+              {error && <div className="text-xs text-rose-700 dark:text-rose-400">{error}</div>}
 
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
@@ -400,11 +407,11 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
           {selectedPath === 'DEMO' && (
             <form
               onSubmit={handleSubmitDemoAccount}
-              className="bg-[#11141A] border border-[#C9A24D]/35 rounded-xl p-6 space-y-5"
+              className="bg-white dark:bg-[#0E182A] border border-blue-200 dark:border-sky-500/35 rounded-xl p-6 space-y-5"
             >
-              <div className="border-b border-white/[0.08] pb-4">
-                <h3 className="text-base font-semibold text-white">Create Your Demo Account</h3>
-                <p className="text-xs text-slate-400 mt-0.5">
+              <div className="border-b border-slate-200 dark:border-slate-800 pb-4">
+                <h3 className="text-base font-semibold text-slate-900 dark:text-white">Create Your Demo Account</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                   Enter your trader profile, mobile number, and email address to activate your demo
                   account and proceed to the main landing page.
                 </p>
@@ -412,8 +419,8 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
                 <div>
-                  <label className="block text-slate-300 mb-1.5 font-medium">
-                    Full Name <span className="text-red-400">*</span>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1.5 font-medium">
+                    Full Name <span className="text-rose-700 dark:text-rose-400">*</span>
                   </label>
                   <div className="relative">
                     <User className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
@@ -424,14 +431,14 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                       value={fullName}
                       onChange={(e) => setFullName(e.target.value)}
                       placeholder="e.g. Aarav Mehta"
-                      className="w-full bg-[#090B0E] border border-white/[0.1] rounded-lg pl-9 pr-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#C9A24D]"
+                      className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg pl-9 pr-3 py-2.5 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-600 dark:focus:border-sky-400"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 mb-1.5 font-medium">
-                    Mobile Number <span className="text-red-400">*</span>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1.5 font-medium">
+                    Mobile Number <span className="text-rose-700 dark:text-rose-400">*</span>
                   </label>
                   <div className="relative">
                     <Phone className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
@@ -442,14 +449,14 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                       value={mobileNumber}
                       onChange={(e) => setMobileNumber(e.target.value)}
                       placeholder="e.g. +91 98765 43210"
-                      className="w-full bg-[#090B0E] border border-white/[0.1] rounded-lg pl-9 pr-3 py-2.5 font-mono-tabular text-white placeholder-slate-500 focus:outline-none focus:border-[#C9A24D]"
+                      className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg pl-9 pr-3 py-2.5 font-mono-tabular text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-600 dark:focus:border-sky-400"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 mb-1.5 font-medium">
-                    Email Address <span className="text-red-400">*</span>
+                  <label className="block text-slate-700 dark:text-slate-300 mb-1.5 font-medium">
+                    Email Address <span className="text-rose-700 dark:text-rose-400">*</span>
                   </label>
                   <div className="relative">
                     <Mail className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-3" />
@@ -460,7 +467,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="trader@example.com"
-                      className="w-full bg-[#090B0E] border border-white/[0.1] rounded-lg pl-9 pr-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-[#C9A24D]"
+                      className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg pl-9 pr-3 py-2.5 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-600 dark:focus:border-sky-400"
                     />
                   </div>
                 </div>
@@ -468,7 +475,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs pt-1">
                 <div>
-                  <label className="block text-slate-400 mb-1.5">
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1.5">
                     Starting Demo Capital Allocation
                   </label>
                   <input
@@ -477,7 +484,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                     step={1000}
                     value={startingCapital}
                     onChange={(e) => setStartingCapital(e.target.value)}
-                    className="w-full bg-[#090B0E] border border-white/[0.1] rounded-lg px-3 py-2.5 font-mono-tabular text-white focus:outline-none focus:border-[#C9A24D]"
+                    className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2.5 font-mono-tabular text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 dark:focus:border-sky-400"
                   />
                   <div className="flex flex-wrap gap-1.5 mt-2">
                     {[50000, 100000, 500000].map((amt) => (
@@ -485,7 +492,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                         key={amt}
                         type="button"
                         onClick={() => setStartingCapital(String(amt))}
-                        className="px-2 py-1 text-[11px] font-mono-tabular bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded"
+                        className="px-2 py-1 text-[11px] font-mono-tabular bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded"
                       >
                         {amt.toLocaleString()}
                       </button>
@@ -494,11 +501,11 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1.5">Primary Market</label>
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1.5">Primary Market</label>
                   <select
                     value={defaultInstrumentId}
                     onChange={(e) => setDefaultInstrumentId(e.target.value)}
-                    className="w-full bg-[#090B0E] border border-white/[0.1] rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-[#C9A24D]"
+                    className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg px-3 py-2.5 text-slate-900 dark:text-white focus:outline-none focus:border-blue-600 dark:focus:border-sky-400"
                   >
                     {INSTRUMENTS.map((inst) => (
                       <option key={inst.id} value={inst.id}>
@@ -509,7 +516,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1.5">Risk Tier &amp; Timeframe</label>
+                  <label className="block text-slate-500 dark:text-slate-400 mb-1.5">Risk Tier &amp; Timeframe</label>
                   <div className="grid grid-cols-2 gap-2">
                     <select
                       value={riskProfile}
@@ -518,7 +525,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                           e.target.value as 'CONSERVATIVE' | 'BALANCED' | 'AGGRESSIVE'
                         )
                       }
-                      className="bg-[#090B0E] border border-white/[0.1] rounded-lg px-2.5 py-2.5 text-white"
+                      className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-2.5 text-slate-900 dark:text-white"
                     >
                       <option value="CONSERVATIVE">Conservative</option>
                       <option value="BALANCED">Balanced</option>
@@ -527,7 +534,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                     <select
                       value={defaultTimeframe}
                       onChange={(e) => setDefaultTimeframe(e.target.value as Timeframe)}
-                      className="bg-[#090B0E] border border-white/[0.1] rounded-lg px-2.5 py-2.5 text-white"
+                      className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-300 dark:border-slate-700 rounded-lg px-2.5 py-2.5 text-slate-900 dark:text-white"
                     >
                       <option value="5m">5M</option>
                       <option value="15m">15M</option>
@@ -537,13 +544,13 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                 </div>
               </div>
 
-              {error && <div className="text-xs text-red-400">{error}</div>}
+              {error && <div className="text-xs text-rose-700 dark:text-rose-400">{error}</div>}
 
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold bg-[#C9A24D] hover:bg-[#d8b462] text-[#090B0E] rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold bg-blue-700 dark:bg-sky-500 hover:bg-blue-800 dark:hover:bg-sky-400 text-white dark:text-slate-950 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50"
                 >
                   <Check className="w-4 h-4" />
                   {submitting

@@ -99,15 +99,15 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-xl font-semibold text-white">AI Chart Analysis BOT</h2>
-        <p className="text-xs text-slate-400 mt-0.5">
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-white">AI Chart Analysis BOT</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
           Upload TradingView or candlestick screenshots for visual market structure, EMA, S/R, and signal extraction. Verified observations are strictly separated from unverified or non-visible values.
         </p>
       </div>
 
       <form
         onSubmit={handleAnalyze}
-        className="bg-[#11141A] border border-white/[0.08] rounded-xl p-5 grid grid-cols-1 lg:grid-cols-12 gap-6"
+        className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-5 grid grid-cols-1 lg:grid-cols-12 gap-6"
       >
         {/* Upload Zone */}
         <div className="lg:col-span-6 space-y-3">
@@ -132,20 +132,20 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
                 const f = e.dataTransfer.files?.[0];
                 if (f) handleFileSelect(f);
               }}
-              className="w-full h-72 border border-dashed border-white/20 hover:border-emerald-500/60 bg-[#090B0E] rounded-xl flex flex-col items-center justify-center p-6 text-center transition-colors"
+              className="w-full h-72 border border-dashed border-slate-300 dark:border-slate-700 hover:border-emerald-500/60 bg-[#F4F6FA] dark:bg-[#08101E] rounded-xl flex flex-col items-center justify-center p-6 text-center transition-colors"
             >
-              <ImagePlus className="w-8 h-8 text-slate-400 mb-3" />
-              <div className="text-sm font-medium text-white">
+              <ImagePlus className="w-8 h-8 text-slate-500 dark:text-slate-400 mb-3" />
+              <div className="text-sm font-medium text-slate-900 dark:text-white">
                 Click or drag & drop TradingView chart screenshot
               </div>
-              <p className="text-xs text-slate-400 mt-1">
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
                 PNG, JPG, WebP up to 10 MB · Candlestick, EMA, VWAP, or Volume charts
               </p>
             </button>
           ) : (
-            <div className="bg-[#090B0E] border border-white/[0.08] rounded-xl overflow-hidden">
-              <div className="px-3.5 py-2 border-b border-white/[0.08] flex items-center justify-between text-xs">
-                <span className="text-slate-300 truncate">{fileName || 'Uploaded Chart'}</span>
+            <div className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+              <div className="px-3.5 py-2 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                <span className="text-slate-700 dark:text-slate-300 truncate">{fileName || 'Uploaded Chart'}</span>
                 <button
                   type="button"
                   onClick={() => {
@@ -153,7 +153,7 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
                     setFileName('');
                     setResultSignal(null);
                   }}
-                  className="inline-flex items-center gap-1 text-red-400 hover:text-red-300"
+                  className="inline-flex items-center gap-1 text-rose-700 dark:text-rose-400 hover:text-rose-700 dark:hover:text-rose-300"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   Remove
@@ -172,11 +172,11 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
         <div className="lg:col-span-6 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">Trading Instrument</label>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Trading Instrument</label>
               <select
                 value={instrumentId}
                 onChange={(e) => setInstrumentId(e.target.value)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
               >
                 {INSTRUMENTS.map((inst) => (
                   <option key={inst.id} value={inst.id}>
@@ -187,11 +187,11 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">Screenshot Timeframe</label>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Screenshot Timeframe</label>
               <select
                 value={timeframe}
                 onChange={(e) => setTimeframe(e.target.value as Timeframe)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
               >
                 <option value="5m">5 Minutes (Entry TF)</option>
                 <option value="15m">15 Minutes (Primary Trend TF)</option>
@@ -204,7 +204,7 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">
                 Current Price (Optional)
               </label>
               <input
@@ -213,13 +213,13 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
                 placeholder="e.g. 24380"
                 value={currentPrice}
                 onChange={(e) => setCurrentPrice(e.target.value)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs font-mono-tabular text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2.5 text-xs font-mono-tabular text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               />
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">Contract / Option Type</label>
-              <div className="grid grid-cols-3 gap-1 bg-[#090B0E] border border-white/[0.08] rounded-lg p-1">
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Contract / Option Type</label>
+              <div className="grid grid-cols-3 gap-1 bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-1">
                 {(['SPOT_FUT', 'CE', 'PE'] as const).map((t) => (
                   <button
                     key={t}
@@ -227,8 +227,8 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
                     onClick={() => setOptionType(t)}
                     className={`py-1.5 text-[11px] font-medium rounded-md transition-colors ${
                       optionType === t
-                        ? 'bg-slate-800 text-white'
-                        : 'text-slate-400 hover:text-slate-200'
+                        ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                     }`}
                   >
                     {t === 'SPOT_FUT' ? 'SPOT' : t}
@@ -238,18 +238,18 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs text-slate-400 mb-1.5">Options Expiry</label>
+              <label className="block text-xs text-slate-500 dark:text-slate-400 mb-1.5">Options Expiry</label>
               <input
                 type="text"
                 placeholder="e.g. 26 NOV 2026"
                 value={expiry}
                 onChange={(e) => setExpiry(e.target.value)}
-                className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+                className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
               />
             </div>
           </div>
 
-          <div className="bg-[#090B0E] border border-white/[0.06] rounded-lg p-3 text-xs text-slate-400 leading-relaxed">
+          <div className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
             Strategy Engine Active: Primary Trend {config.trendTimeframe.toUpperCase()} · Entry{' '}
             {config.entryTimeframe.toUpperCase()} · EMA {config.emaFast}/{config.emaMid}/
             {config.emaSlow} · Min Score {config.minSetupScore}/100 · Min R:R 1:
@@ -257,7 +257,7 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
           </div>
 
           {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-xs text-red-300">
+            <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/35 rounded-lg text-xs text-rose-700 dark:text-rose-300">
               {error}
             </div>
           )}

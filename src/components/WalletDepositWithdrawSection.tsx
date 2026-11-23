@@ -115,16 +115,16 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
   };
 
   return (
-    <section className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
+    <section className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
       {/* Header */}
-      <div className="px-6 py-5 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-4">
+      <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <Wallet className="w-4 h-4 text-emerald-400 shrink-0" />
+          <Wallet className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
           <div>
-            <h2 className="text-base font-semibold text-white tracking-tight">
+            <h2 className="text-base font-semibold text-slate-900 dark:text-white tracking-tight">
               Wallet · Deposit &amp; Withdrawal
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               Manage wallet balance, instant deposits, and withdrawals
             </p>
           </div>
@@ -133,7 +133,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
         <button
           type="button"
           onClick={() => setShowLedger((v) => !v)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0"
         >
           <History className="w-3.5 h-3.5" />
           {showLedger ? 'Hide Ledger' : `Transactions (${wallet.recentDeposits.length})`}
@@ -141,20 +141,20 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
       </div>
 
       {/* Wallet Balance Strip */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-white/[0.06] border-b border-white/[0.06]">
+      <div className="grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800 border-b border-slate-200 dark:border-slate-800">
         <div className="px-6 py-4">
-          <div className="text-xs text-slate-400">Wallet Balance</div>
-          <div className="font-mono-tabular text-2xl font-semibold text-white mt-1">
+          <div className="text-xs text-slate-500 dark:text-slate-400">Wallet Balance</div>
+          <div className="font-mono-tabular text-2xl font-semibold text-slate-900 dark:text-white mt-1">
             {fmt(wallet.balance, 2)}
           </div>
           <div className="text-[11px] text-slate-500 mt-0.5">Available funds</div>
         </div>
 
         <div className="px-6 py-4">
-          <div className="text-xs text-slate-400">Live Total Equity</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Live Total Equity</div>
           <div
             className={`font-mono-tabular text-2xl font-semibold mt-1 ${
-              liveEquity >= wallet.balance ? 'text-emerald-400' : 'text-red-400'
+              liveEquity >= wallet.balance ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
             }`}
           >
             {fmt(liveEquity, 2)}
@@ -163,7 +163,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
         </div>
 
         <div className="px-6 py-4">
-          <div className="text-xs text-slate-400">Free Margin</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Free Margin</div>
           <div className="font-mono-tabular text-2xl font-semibold text-slate-100 mt-1">
             {fmt(freeMargin, 2)}
           </div>
@@ -173,7 +173,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
         </div>
 
         <div className="px-6 py-4">
-          <div className="text-xs text-slate-400">Total Deposited</div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">Total Deposited</div>
           <div className="font-mono-tabular text-2xl font-semibold text-slate-100 mt-1">
             {fmt(wallet.totalAdded, 0)}
           </div>
@@ -185,8 +185,8 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
         <div
           className={`mx-6 mt-5 px-3.5 py-2.5 rounded-lg border text-xs flex items-center gap-2 ${
             feedback.type === 'ok'
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
-              : 'bg-red-500/10 border-red-500/30 text-red-200'
+              ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/35 text-emerald-800 dark:text-emerald-200'
+              : 'bg-rose-50 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/35 text-rose-800 dark:text-rose-200'
           }`}
         >
           <CheckCircle2 className="w-4 h-4 shrink-0" />
@@ -195,7 +195,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
       )}
 
       {/* Side-by-Side Deposit & Withdrawal Controls separated by hairline */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-white/[0.06]">
+      <div className="grid grid-cols-1 lg:grid-cols-2 divide-y lg:divide-y-0 lg:divide-x divide-slate-200 dark:divide-slate-800">
         {/* Deposit Column */}
         <form
           onSubmit={(e) => {
@@ -205,7 +205,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
           className="p-6 space-y-3.5"
         >
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-300">
+            <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
               <ArrowDownLeft className="w-4 h-4" />
               Deposit Funds
             </div>
@@ -219,7 +219,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
                 type="button"
                 disabled={busyAction !== null}
                 onClick={() => void handleDepositAmount(amt, 'Quick Deposit')}
-                className="px-2.5 py-1 text-[11px] font-mono-tabular font-medium bg-[#090B0E] hover:bg-emerald-600/20 border border-white/[0.08] hover:border-emerald-500/40 text-emerald-300 rounded-md transition-colors disabled:opacity-50"
+                className="px-2.5 py-1 text-[11px] font-mono-tabular font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-emerald-50 dark:hover:bg-emerald-600/20 border border-slate-200 dark:border-slate-800 hover:border-emerald-200 dark:hover:border-emerald-500/35 text-emerald-700 dark:text-emerald-300 rounded-md transition-colors disabled:opacity-50"
               >
                 +{amt.toLocaleString()}
               </button>
@@ -234,7 +234,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
               value={depositAmount}
               onChange={(e) => setDepositAmount(e.target.value)}
               placeholder="Deposit amount"
-              className="bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono-tabular text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs font-mono-tabular text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
             <input
               type="text"
@@ -242,7 +242,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
               value={depositNote}
               onChange={(e) => setDepositNote(e.target.value)}
               placeholder="Method / note"
-              className="bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-emerald-500"
             />
           </div>
 
@@ -265,11 +265,11 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
           className="p-6 space-y-3.5"
         >
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-semibold text-amber-300">
+            <div className="flex items-center gap-2 text-xs font-semibold text-amber-700 dark:text-amber-300">
               <ArrowUpRight className="w-4 h-4" />
               Withdraw Funds
             </div>
-            <span className="text-[11px] font-mono-tabular text-slate-400">
+            <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400">
               Available: {fmt(wallet.balance, 0)}
             </span>
           </div>
@@ -281,7 +281,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
                 type="button"
                 disabled={busyAction !== null || wallet.balance < amt}
                 onClick={() => void handleWithdrawAmount(amt, 'Quick Withdrawal')}
-                className="px-2.5 py-1 text-[11px] font-mono-tabular font-medium bg-[#090B0E] hover:bg-amber-600/20 border border-white/[0.08] hover:border-amber-500/40 text-amber-300 rounded-md transition-colors disabled:opacity-40"
+                className="px-2.5 py-1 text-[11px] font-mono-tabular font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-amber-50 dark:hover:bg-amber-600/20 border border-slate-200 dark:border-slate-800 hover:border-amber-200 dark:hover:border-amber-500/35 text-amber-700 dark:text-amber-300 rounded-md transition-colors disabled:opacity-40"
               >
                 -{amt.toLocaleString()}
               </button>
@@ -290,7 +290,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
               type="button"
               disabled={busyAction !== null || wallet.balance <= 0}
               onClick={() => setWithdrawAmount(String(wallet.balance))}
-              className="px-2.5 py-1 text-[11px] font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded-md transition-colors disabled:opacity-40"
+              className="px-2.5 py-1 text-[11px] font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-md transition-colors disabled:opacity-40"
             >
               Max
             </button>
@@ -304,7 +304,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
               value={withdrawAmount}
               onChange={(e) => setWithdrawAmount(e.target.value)}
               placeholder="Withdraw amount"
-              className="bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono-tabular text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs font-mono-tabular text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
             <input
               type="text"
@@ -312,7 +312,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
               value={withdrawNote}
               onChange={(e) => setWithdrawNote(e.target.value)}
               placeholder="Payout destination"
-              className="bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
           </div>
 
@@ -334,9 +334,9 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
 
       {/* Collapsible Wallet Ledger & Capital Reset */}
       {showLedger && (
-        <div className="px-6 py-5 border-t border-white/[0.06] grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs">
+        <div className="px-6 py-5 border-t border-slate-200 dark:border-slate-800 grid grid-cols-1 lg:grid-cols-12 gap-6 text-xs">
           <div className="lg:col-span-7 space-y-2">
-            <div className="font-semibold text-slate-200">
+            <div className="font-semibold text-slate-800 dark:text-slate-200">
               Recent Deposit &amp; Withdrawal Ledger
             </div>
             {wallet.recentDeposits.length === 0 ? (
@@ -349,7 +349,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
                     <div
                       key={`${entry}-${idx}`}
                       className={`py-1.5 ${
-                        isWithdraw ? 'text-amber-300' : 'text-emerald-300'
+                        isWithdraw ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'
                       }`}
                     >
                       {entry}
@@ -366,7 +366,7 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
               className="lg:col-span-5 flex flex-wrap items-end gap-2.5"
             >
               <div className="flex-1 min-w-[140px]">
-                <label className="block text-[11px] text-slate-400 mb-1.5">
+                <label className="block text-[11px] text-slate-500 dark:text-slate-400 mb-1.5">
                   Set / Reset Wallet Balance
                 </label>
                 <input
@@ -375,13 +375,13 @@ export const WalletDepositWithdrawSection: React.FC<WalletDepositWithdrawSection
                   step="any"
                   value={resetInput}
                   onChange={(e) => setResetInput(e.target.value)}
-                  className="w-full bg-[#090B0E] border border-white/[0.08] rounded-lg px-3 py-2 text-xs font-mono-tabular text-white"
+                  className="w-full bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg px-3 py-2 text-xs font-mono-tabular text-slate-900 dark:text-white"
                 />
               </div>
               <button
                 type="submit"
                 disabled={busyAction !== null}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg whitespace-nowrap shrink-0"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 Reset Capital

@@ -245,15 +245,15 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <h2 className="text-xl font-semibold text-white">Market Watchlist</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-white">Market Watchlist</h2>
             {liveStreamEnabled && (
-              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-400">
+              <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-400">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 {wsConnected ? 'WS + 3s Live' : 'Live 3s'}
               </span>
             )}
           </div>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             {lastUpdated
               ? `15m Multi-Market Snapshot · Synced ${new Date(lastUpdated).toLocaleTimeString()}`
               : 'Loading live multi-market quotes...'}
@@ -261,7 +261,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center bg-[#11141A] border border-white/[0.08] rounded-lg p-1">
+          <div className="flex items-center bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-lg p-1">
             {(['ALL', 'INDIAN', 'MCX', 'INTERNATIONAL'] as const).map((tab) => (
               <button
                 key={tab}
@@ -269,8 +269,8 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                 onClick={() => setSegment(tab)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
                   segment === tab
-                    ? 'bg-slate-800 text-white'
-                    : 'text-slate-400 hover:text-slate-200'
+                    ? 'bg-blue-700 dark:bg-slate-800 text-white'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 {tab === 'ALL'
@@ -289,8 +289,8 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
             onClick={() => setLiveStreamEnabled((v) => !v)}
             className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
               liveStreamEnabled
-                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                : 'bg-[#11141A] border-white/[0.08] text-slate-400'
+                ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-200 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                : 'bg-white dark:bg-[#0E182A] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400'
             }`}
           >
             {liveStreamEnabled ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -301,7 +301,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
             type="button"
             onClick={() => loadWatchlist({ silent: false })}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#11141A] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-white dark:bg-[#0E182A] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh Quotes
@@ -314,14 +314,14 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
         return (
           <div
             key={sec.seg}
-            className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden"
+            className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden"
           >
-            <div className="px-5 py-3.5 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
+            <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h3 className="text-sm font-semibold text-white">{sec.title}</h3>
-                <p className="text-xs text-slate-400">{sec.subtitle}</p>
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{sec.title}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{sec.subtitle}</p>
               </div>
-              <span className="text-xs text-slate-400 font-mono-tabular">
+              <span className="text-xs text-slate-500 dark:text-slate-400 font-mono-tabular">
                 {items.length} Instruments
               </span>
             </div>
@@ -329,7 +329,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
-                  <tr className="border-b border-white/[0.06] text-[11px] text-slate-400">
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                     <th className="py-2.5 px-4 font-medium">Instrument</th>
                     <th className="py-2.5 px-4 font-medium text-right">Live Price</th>
                     <th className="py-2.5 px-4 font-medium text-right">Change %</th>
@@ -340,7 +340,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                     <th className="py-2.5 px-4 font-medium text-right">Action</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-white/[0.06] text-xs">
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
                   {items.map((inst) => {
                     const q = quotes[inst.id];
                     const isSelected = inst.id === selectedInstrumentId;
@@ -354,13 +354,13 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                     return (
                       <tr
                         key={inst.id}
-                        className={`hover:bg-white/[0.03] transition-colors ${
+                        className={`hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors ${
                           isSelected ? 'bg-emerald-500/[0.04]' : ''
                         }`}
                       >
                         <td className="py-3 px-4">
-                          <div className="font-semibold text-white">{inst.symbol}</div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="font-semibold text-slate-900 dark:text-white">{inst.symbol}</div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
                             {inst.name} · {inst.exchangeLabel}
                           </div>
                         </td>
@@ -368,12 +368,12 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                         <td
                           className={`py-3 px-4 text-right font-mono-tabular font-semibold transition-colors ${
                             !q?.available
-                              ? 'text-white'
+                              ? 'text-slate-900 dark:text-white'
                               : tickDir === 'UP'
-                                ? 'text-emerald-300'
+                                ? 'text-emerald-700 dark:text-emerald-300'
                                 : tickDir === 'DOWN'
-                                  ? 'text-red-300'
-                                  : 'text-white'
+                                  ? 'text-rose-700 dark:text-rose-300'
+                                  : 'text-slate-900 dark:text-white'
                           }`}
                         >
                           {loading && !q ? (
@@ -381,7 +381,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                           ) : q?.available && q.price !== undefined ? (
                             `${inst.currency}${q.price.toLocaleString()}`
                           ) : (
-                            <span className="text-amber-400">DATA UNAVAILABLE</span>
+                            <span className="text-amber-700 dark:text-amber-400">DATA UNAVAILABLE</span>
                           )}
                         </td>
 
@@ -390,8 +390,8 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                             !q?.available
                               ? 'text-slate-500'
                               : pos
-                                ? 'text-emerald-400'
-                                : 'text-red-400'
+                                ? 'text-emerald-700 dark:text-emerald-400'
+                                : 'text-rose-700 dark:text-rose-400'
                           }`}
                         >
                           {q?.available && q.changePercent !== undefined
@@ -404,10 +404,10 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                             <span
                               className={`font-medium ${
                                 q.technicals.trendBias === 'BULLISH'
-                                  ? 'text-emerald-400'
+                                  ? 'text-emerald-700 dark:text-emerald-400'
                                   : q.technicals.trendBias === 'BEARISH'
-                                    ? 'text-red-400'
-                                    : 'text-amber-300'
+                                    ? 'text-rose-700 dark:text-rose-400'
+                                    : 'text-amber-700 dark:text-amber-300'
                               }`}
                             >
                               {q.technicals.trendBias}
@@ -417,13 +417,13 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                           )}
                         </td>
 
-                        <td className="py-3 px-4 text-right font-mono-tabular text-slate-300">
+                        <td className="py-3 px-4 text-right font-mono-tabular text-slate-700 dark:text-slate-300">
                           {q?.available && q.technicals?.rsi !== null && q.technicals?.rsi !== undefined
                             ? q.technicals.rsi.toFixed(1)
                             : '—'}
                         </td>
 
-                        <td className="py-3 px-4 text-slate-300">
+                        <td className="py-3 px-4 text-slate-700 dark:text-slate-300">
                           {atmStrike ? (
                             <span className="font-mono-tabular">
                               ATM {atmStrike} CE / PE
@@ -435,7 +435,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                           )}
                         </td>
 
-                        <td className="py-3 px-4 text-[11px] text-slate-400">
+                        <td className="py-3 px-4 text-[11px] text-slate-500 dark:text-slate-400">
                           {q?.available ? (
                             <div>
                               <div className="font-mono-tabular">
@@ -452,7 +452,7 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onSelectInstrument(inst.id)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#161A22] hover:bg-slate-800 border border-white/[0.08] text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg transition-colors whitespace-nowrap shrink-0"
                           >
                             Analyze
                             <ArrowUpRight className="w-3.5 h-3.5" />

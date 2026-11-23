@@ -155,6 +155,12 @@ export async function saveStrategyConfig(
         brokerProviderLabel: clampString(config.brokerProviderLabel, 80),
         killSwitchActive: Boolean(config.killSwitchActive),
         activeInstruments: (config.activeInstruments || []).slice(0, 50),
+        adxMinThreshold: Math.max(10, Math.min(50, Number(config.adxMinThreshold ?? DEFAULT_STRATEGY_CONFIG.adxMinThreshold))),
+        enableSessionFilter: Boolean(config.enableSessionFilter ?? DEFAULT_STRATEGY_CONFIG.enableSessionFilter),
+        pauseOnHighImpactNews: Boolean(config.pauseOnHighImpactNews ?? DEFAULT_STRATEGY_CONFIG.pauseOnHighImpactNews),
+        enablePartialProfitBooking: Boolean(config.enablePartialProfitBooking ?? DEFAULT_STRATEGY_CONFIG.enablePartialProfitBooking),
+        dailyMaxLossPct: Math.max(0.5, Math.min(25, Number(config.dailyMaxLossPct ?? DEFAULT_STRATEGY_CONFIG.dailyMaxLossPct))),
+        dailyProfitTargetPct: Math.max(1, Math.min(50, Number(config.dailyProfitTargetPct ?? DEFAULT_STRATEGY_CONFIG.dailyProfitTargetPct))),
         updatedAt: serverTimestamp(),
       },
       { merge: false }
@@ -300,8 +306,11 @@ export async function createTradeEntry(
       target1: Number(entry.target1),
       ...(entry.target2 !== undefined ? { target2: Number(entry.target2) } : {}),
       ...(entry.target3 !== undefined ? { target3: Number(entry.target3) } : {}),
+      ...(entry.tpStage !== undefined ? { tpStage: Math.max(0, Math.min(2, Math.round(entry.tpStage))) } : {}),
       ...(entry.exitPrice !== undefined ? { exitPrice: Number(entry.exitPrice) } : {}),
       quantity: Number(entry.quantity),
+      ...(entry.remainingQuantity !== undefined ? { remainingQuantity: Math.max(0, Number(entry.remainingQuantity)) } : {}),
+      ...(entry.partialRealizedPnl !== undefined ? { partialRealizedPnl: Number(entry.partialRealizedPnl) } : {}),
       status: entry.status,
       result: entry.result,
       pnl: Number(entry.pnl),
@@ -309,6 +318,9 @@ export async function createTradeEntry(
       strategyConfirmation: clampString(entry.strategyConfirmation, 500) || 'My Trade setup',
       ...(entry.screenshotNote ? { screenshotNote: clampString(entry.screenshotNote, 300) } : {}),
       ...(entry.brokerOrderId ? { brokerOrderId: clampString(entry.brokerOrderId, 80) } : {}),
+      ...(Array.isArray(entry.auditTrail) && entry.auditTrail.length > 0
+        ? { auditTrail: entry.auditTrail.slice(0, 20).map((s) => clampString(s, 180)) }
+        : {}),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -325,6 +337,9 @@ export async function closeTradeEntry(
     pnl: number;
     result: 'WIN' | 'LOSS' | 'BREAKEVEN';
     screenshotNote?: string;
+    remainingQuantity?: number;
+    partialRealizedPnl?: number;
+    auditTrail?: string[];
   }
 ): Promise<void> {
   const ref = doc(db, 'trades', tradeId);
@@ -334,7 +349,35 @@ export async function closeTradeEntry(
       status: 'CLOSED',
       result: params.result,
       pnl: Number(params.pnl),
+      ...(params.remainingQuantity !== undefined ? { remainingQuantity: Math.max(0, Number(params.remainingQuantity)) } : {}),
+      ...(params.partialRealizedPnl !== undefined ? { partialRealizedPnl: Number(params.partialRealizedPnl) } : {}),
       ...(params.screenshotNote ? { screenshotNote: clampString(params.screenshotNote, 300) } : {}),
+      ...(Array.isArray(params.auditTrail) ? { auditTrail: params.auditTrail.slice(0, 20).map((s) => clampString(s, 180)) } : {}),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.UPDATE, `trades/${tradeId}`);
+  }
+}
+
+export async function updateTradeTrailingStop(
+  tradeId: string,
+  params: {
+    stopLoss: number;
+    tpStage: 0 | 1 | 2;
+    remainingQuantity?: number;
+    partialRealizedPnl?: number;
+    auditTrail?: string[];
+  }
+): Promise<void> {
+  const ref = doc(db, 'trades', tradeId);
+  try {
+    await updateDoc(ref, {
+      stopLoss: Number(params.stopLoss),
+      tpStage: Math.max(0, Math.min(2, Math.round(params.tpStage))),
+      ...(params.remainingQuantity !== undefined ? { remainingQuantity: Math.max(0, Number(params.remainingQuantity)) } : {}),
+      ...(params.partialRealizedPnl !== undefined ? { partialRealizedPnl: Number(params.partialRealizedPnl) } : {}),
+      ...(Array.isArray(params.auditTrail) ? { auditTrail: params.auditTrail.slice(0, 20).map((s) => clampString(s, 180)) } : {}),
       updatedAt: serverTimestamp(),
     });
   } catch (err) {
@@ -473,6 +516,8 @@ export async function createExecutionOrder(
       entryPrice: Number(order.entryPrice),
       stopLoss: Number(order.stopLoss),
       targetPrice: Number(order.targetPrice),
+      ...(order.target2 !== undefined ? { target2: Number(order.target2) } : {}),
+      ...(order.target3 !== undefined ? { target3: Number(order.target3) } : {}),
       executionMode: order.executionMode,
       brokerName: clampString(order.brokerName, 60),
       ...(order.brokerOrderId ? { brokerOrderId: clampString(order.brokerOrderId, 80) } : {}),
@@ -681,8 +726,10 @@ export async function createOrUpdatePineStrategy(
       pineCode: (strategy.pineCode || '').slice(0, 30_000),
       quantity: Math.max(0.01, Number(strategy.quantity) || 1),
       initialCapital: Math.max(100, Number(strategy.initialCapital) || 100_000),
-      stopLossPct: Math.max(0.05, Math.min(50, Number(strategy.stopLossPct) || 0.6)),
-      takeProfitPct: Math.max(0.05, Math.min(200, Number(strategy.takeProfitPct) || 1.2)),
+      stopLossPct: Math.max(0.05, Math.min(50, Number(strategy.stopLossPct) || 0.55)),
+      takeProfitPct: Math.max(0.05, Math.min(200, Number(strategy.takeProfitPct) || 1.65)),
+      riskPerTradePct: Math.max(0, Math.min(10, Number(strategy.riskPerTradePct ?? 2.5))),
+      trailingStop: strategy.trailingStop !== false,
       executionMode: strategy.executionMode,
       botEnabled: Boolean(strategy.botEnabled),
       autoExecute: Boolean(strategy.autoExecute),

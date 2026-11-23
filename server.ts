@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import crypto from 'crypto';
 import express, { type Request, type Response } from 'express';
 import fs from 'fs';
 import http from 'http';
@@ -26,6 +27,14 @@ import {
   enhanceLiveAnalysisWithGemini,
 } from './server/geminiService.ts';
 import { fetchFreeLiveMarketNews } from './server/newsService.ts';
+import { getEconomicCalendarSnapshot } from './server/economicCalendarService.ts';
+import {
+  getGlobalMonitorStats,
+  getMonitoredStatusForOwner,
+  removeMonitoredPosition,
+  startPositionMonitorWorker,
+  syncMonitoredPositions,
+} from './server/positionMonitorService.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,8 +42,109 @@ const __dirname = path.dirname(__filename);
 const app = express();
 app.use(express.json({ limit: '15mb' }));
 
-// Duplicate order guard cache (userId:signalId:side -> timestamp)
+// Duplicate order guard cache (userId:signalId:side -> timestamp) with automatic TTL pruning
 const recentOrderCache = new Map<string, number>();
+
+function pruneRecentOrderCache(now = Date.now()) {
+  for (const [k, ts] of recentOrderCache.entries()) {
+    if (now - ts >= 60_000) {
+      recentOrderCache.delete(k);
+    }
+  }
+}
+
+// Cryptographic Firebase Auth ID token verifier (uses Google's public X.509 certs, zero IAM needed)
+interface VerifiedFirebaseUser {
+  uid: string;
+  email?: string;
+  emailVerified: boolean;
+}
+
+const FIREBASE_CERTS_URL =
+  'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+let cachedFirebaseProjectId: string | null = null;
+let cachedFirebaseCerts: { certs: Record<string, string>; expiresAt: number } | null = null;
+
+function getFirebaseProjectId(): string {
+  if (cachedFirebaseProjectId) return cachedFirebaseProjectId;
+  try {
+    const cfgPath = path.resolve(__dirname, 'firebase-applet-config.json');
+    const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as { projectId?: string };
+    cachedFirebaseProjectId = raw.projectId || process.env.FIREBASE_PROJECT_ID || '';
+  } catch {
+    cachedFirebaseProjectId = process.env.FIREBASE_PROJECT_ID || '';
+  }
+  return cachedFirebaseProjectId;
+}
+
+async function getFirebasePublicCerts(): Promise<Record<string, string>> {
+  const now = Date.now();
+  if (cachedFirebaseCerts && cachedFirebaseCerts.expiresAt > now) {
+    return cachedFirebaseCerts.certs;
+  }
+  const res = await fetch(FIREBASE_CERTS_URL, { signal: AbortSignal.timeout(6000) });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Firebase auth certificates (HTTP ${res.status})`);
+  }
+  const cacheControl = res.headers.get('cache-control') || '';
+  const maxAgeMatch = cacheControl.match(/max-age=(\d+)/i);
+  const ttlMs = maxAgeMatch ? Math.max(60, Number(maxAgeMatch[1])) * 1000 : 3600_000;
+  const certs = (await res.json()) as Record<string, string>;
+  cachedFirebaseCerts = { certs, expiresAt: now + ttlMs };
+  return certs;
+}
+
+async function verifyFirebaseRequestUser(req: Request): Promise<VerifiedFirebaseUser | null> {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+  const token = authHeader.slice(7).trim();
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  try {
+    const projectId = getFirebaseProjectId();
+    if (!projectId) return null;
+
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8')) as {
+      alg?: string;
+      kid?: string;
+    };
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8')) as {
+      aud?: string;
+      iss?: string;
+      sub?: string;
+      exp?: number;
+      iat?: number;
+      email?: string;
+      email_verified?: boolean;
+    };
+
+    if (header.alg !== 'RS256' || !header.kid) return null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (!payload.sub || typeof payload.sub !== 'string' || payload.sub.length > 128) return null;
+    if (payload.aud !== projectId) return null;
+    if (payload.iss !== `https://securetoken.google.com/${projectId}`) return null;
+    if (typeof payload.exp !== 'number' || payload.exp <= nowSec) return null;
+    if (typeof payload.iat !== 'number' || payload.iat > nowSec + 300) return null;
+
+    const certs = await getFirebasePublicCerts();
+    const certPem = certs[header.kid];
+    if (!certPem) return null;
+
+    const signature = Buffer.from(parts[2], 'base64url');
+    const signedData = Buffer.from(`${parts[0]}.${parts[1]}`, 'utf8');
+    const verified = crypto.verify('RSA-SHA256', signedData, certPem, signature);
+    if (!verified) return null;
+
+    return {
+      uid: payload.sub,
+      email: typeof payload.email === 'string' ? payload.email : undefined,
+      emailVerified: payload.email_verified === true,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function sanitizeConfig(raw: any): StrategyConfig {
   return {
@@ -89,6 +199,30 @@ function sanitizeConfig(raw: any): StrategyConfig {
     activeInstruments: Array.isArray(raw?.activeInstruments)
       ? raw.activeInstruments
       : DEFAULT_STRATEGY_CONFIG.activeInstruments,
+    adxMinThreshold: Math.max(
+      10,
+      Math.min(50, Number(raw?.adxMinThreshold ?? DEFAULT_STRATEGY_CONFIG.adxMinThreshold))
+    ),
+    enableSessionFilter:
+      typeof raw?.enableSessionFilter === 'boolean'
+        ? raw.enableSessionFilter
+        : DEFAULT_STRATEGY_CONFIG.enableSessionFilter,
+    pauseOnHighImpactNews:
+      typeof raw?.pauseOnHighImpactNews === 'boolean'
+        ? raw.pauseOnHighImpactNews
+        : DEFAULT_STRATEGY_CONFIG.pauseOnHighImpactNews,
+    enablePartialProfitBooking:
+      typeof raw?.enablePartialProfitBooking === 'boolean'
+        ? raw.enablePartialProfitBooking
+        : DEFAULT_STRATEGY_CONFIG.enablePartialProfitBooking,
+    dailyMaxLossPct: Math.max(
+      0.5,
+      Math.min(25, Number(raw?.dailyMaxLossPct ?? DEFAULT_STRATEGY_CONFIG.dailyMaxLossPct))
+    ),
+    dailyProfitTargetPct: Math.max(
+      1,
+      Math.min(50, Number(raw?.dailyProfitTargetPct ?? DEFAULT_STRATEGY_CONFIG.dailyProfitTargetPct))
+    ),
   };
 }
 
@@ -166,6 +300,18 @@ app.get('/api/news/live', async (req: Request, res: Response) => {
   }
 });
 
+app.get('/api/calendar/economic', async (req: Request, res: Response) => {
+  try {
+    const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
+    const snapshot = await getEconomicCalendarSnapshot(forceRefresh);
+    res.json(snapshot);
+  } catch (err) {
+    res.status(500).json({
+      error: err instanceof Error ? err.message : 'Failed to load economic calendar.',
+    });
+  }
+});
+
 let cachedBotUsername: string | null = null;
 
 async function getTelegramBotUsername(token?: string): Promise<string | null> {
@@ -219,11 +365,55 @@ function isValidTelegramTarget(val?: unknown): val is string {
   return /^-?\d{5,20}$/.test(trimmed) || /^@[a-zA-Z0-9_]{3,64}$/.test(trimmed);
 }
 
+function isBlockedHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    host === 'localhost' ||
+    host === '::1' ||
+    host.endsWith('.local') ||
+    host.endsWith('.internal') ||
+    host.startsWith('fc') ||
+    host.startsWith('fd') ||
+    host.startsWith('fe80:')
+  ) {
+    return true;
+  }
+  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+  if (ipv4Match) {
+    const [a, b] = [Number(ipv4Match[1]), Number(ipv4Match[2])];
+    if (
+      a === 0 ||
+      a === 10 ||
+      a === 127 ||
+      (a === 169 && b === 254) ||
+      (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && b === 168)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function validateExnessBridgeUrl(rawUrl?: string): URL | null {
+  if (!rawUrl || typeof rawUrl !== 'string') return null;
+  try {
+    const parsed = new URL(rawUrl.trim());
+    if (parsed.protocol !== 'https:') return null;
+    if (parsed.username || parsed.password) return null;
+    if (isBlockedHostname(parsed.hostname)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
 function getBrokerReadinessMap(): Record<string, boolean> {
+  const validExnessUrl = Boolean(validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL));
   return {
     PAPER_ENGINE: true,
     GROWW: Boolean(process.env.GROWW_API_TOKEN),
-    EXNESS: Boolean(process.env.EXNESS_BRIDGE_URL && process.env.EXNESS_API_TOKEN),
+    EXNESS: Boolean(validExnessUrl && process.env.EXNESS_API_TOKEN),
     UPSTOX: Boolean(process.env.UPSTOX_ACCESS_TOKEN),
     ZERODHA: Boolean(process.env.KITE_API_KEY && process.env.KITE_ACCESS_TOKEN),
     DHAN: Boolean(process.env.DHAN_CLIENT_ID && process.env.DHAN_ACCESS_TOKEN),
@@ -243,6 +433,86 @@ app.get('/api/brokers/status', (_req: Request, res: Response) => {
     brokers: getBrokerReadinessMap(),
     anyLiveBrokerConfigured: hasAnyLiveBrokerConfigured(),
   });
+});
+
+app.get('/api/brokers/exness/status', (_req: Request, res: Response) => {
+  const parsedUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+  const hasToken = Boolean(process.env.EXNESS_API_TOKEN);
+  const rawAcc = process.env.EXNESS_ACCOUNT_ID?.trim() || '';
+  const accountMasked =
+    rawAcc.length >= 4 ? `${'*'.repeat(Math.max(2, rawAcc.length - 4))}${rawAcc.slice(-4)}` : null;
+
+  res.json({
+    configured: Boolean(parsedUrl && hasToken),
+    bridgeUrlValid: Boolean(parsedUrl),
+    bridgeHost: parsedUrl ? parsedUrl.hostname : null,
+    serverName: process.env.EXNESS_SERVER?.trim() || null,
+    accountMasked,
+  });
+});
+
+app.post('/api/brokers/exness/test', async (req: Request, res: Response) => {
+  const verifiedUser = await verifyFirebaseRequestUser(req);
+  if (!verifiedUser || !verifiedUser.emailVerified) {
+    res.status(401).json({
+      connected: false,
+      message: 'Sign in with your verified Google account to test the live Exness MT5 Bridge.',
+    });
+    return;
+  }
+
+  const parsedUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+  const token = process.env.EXNESS_API_TOKEN?.trim();
+
+  if (!parsedUrl || !token) {
+    res.status(400).json({
+      connected: false,
+      message:
+        'Exness MT5 Bridge is not configured yet. Add HTTPS EXNESS_BRIDGE_URL and EXNESS_API_TOKEN in server environment secrets.',
+    });
+    return;
+  }
+
+  try {
+    const base = parsedUrl.toString().replace(/\/+$/, '');
+    const healthRes = await fetch(`${base}/health`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (!healthRes.ok) {
+      res.status(502).json({
+        connected: false,
+        message: `Exness MT5 Bridge responded with HTTP ${healthRes.status}. Verify your token and bridge /health route.`,
+      });
+      return;
+    }
+
+    const payload = (await healthRes.json().catch(() => ({}))) as Record<string, unknown>;
+    res.json({
+      connected: true,
+      bridgeHost: parsedUrl.hostname,
+      serverName:
+        (typeof payload.server === 'string' && payload.server) ||
+        process.env.EXNESS_SERVER?.trim() ||
+        'Exness MT5 Bridge',
+      balance: typeof payload.balance === 'number' ? payload.balance : undefined,
+      currency: typeof payload.currency === 'string' ? payload.currency : 'USD',
+      message: 'Connected to Exness MT5 Execution Bridge successfully.',
+    });
+  } catch (err) {
+    res.status(502).json({
+      connected: false,
+      message:
+        err instanceof Error
+          ? `Could not reach Exness MT5 Bridge: ${err.message}`
+          : 'Exness MT5 Bridge connection timed out.',
+    });
+  }
 });
 
 app.get('/api/integrations/status', async (_req: Request, res: Response) => {
@@ -491,6 +761,8 @@ app.post('/api/pine/backtest', async (req: Request, res: Response) => {
       initialCapital,
       stopLossPct,
       takeProfitPct,
+      riskPerTradePct,
+      trailingStop,
     } = req.body ?? {};
 
     if (!pineCode || typeof pineCode !== 'string' || pineCode.trim().length < 5) {
@@ -509,8 +781,13 @@ app.post('/api/pine/backtest', async (req: Request, res: Response) => {
       pineCode: pineCode.slice(0, 30_000),
       quantity: Number(quantity) || 1,
       initialCapital: Number(initialCapital) || 100_000,
-      stopLossPct: Number(stopLossPct) || 0.6,
-      takeProfitPct: Number(takeProfitPct) || 1.2,
+      stopLossPct: Number(stopLossPct) || 0.55,
+      takeProfitPct: Number(takeProfitPct) || 1.65,
+      riskPerTradePct:
+        riskPerTradePct !== undefined && Number.isFinite(Number(riskPerTradePct))
+          ? Number(riskPerTradePct)
+          : 2.5,
+      trailingStop: trailingStop !== false,
     });
 
     res.json(result);
@@ -651,7 +928,12 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
   }
 });
 
-app.get('/api/telegram/chats', async (_req: Request, res: Response) => {
+app.get('/api/telegram/chats', async (req: Request, res: Response) => {
+  const verifiedUser = await verifyFirebaseRequestUser(req);
+  if (!verifiedUser || !verifiedUser.emailVerified) {
+    res.status(401).json({ error: 'Sign in with Google to detect Telegram bot chats.' });
+    return;
+  }
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     res.json({ botConfigured: false, botUsername: null, chats: [] });
@@ -671,6 +953,15 @@ app.get('/api/telegram/chats', async (_req: Request, res: Response) => {
 
 app.post('/api/telegram/send', async (req: Request, res: Response) => {
   try {
+    const verifiedUser = await verifyFirebaseRequestUser(req);
+    if (!verifiedUser || !verifiedUser.emailVerified) {
+      res.status(401).json({
+        deliveryStatus: 'FAILED',
+        statusDetail: 'Sign in with Google before broadcasting alerts via the server Telegram bot.',
+      });
+      return;
+    }
+
     const { messageText, chatId: requestedChatId } = req.body ?? {};
     if (!messageText || typeof messageText !== 'string') {
       res.status(400).json({ error: 'messageText is required.' });
@@ -752,6 +1043,8 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       entryPrice,
       stopLoss,
       targetPrice,
+      target2,
+      target3,
       executionMode,
       brokerName,
       userConfirmed,
@@ -782,7 +1075,21 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       return;
     }
 
-    const dedupKey = `${userId || 'anon'}:${signalId || contract}:${side}`;
+    pruneRecentOrderCache();
+    const verifiedUser = await verifyFirebaseRequestUser(req);
+    const effectiveUserId = verifiedUser?.uid || (executionMode === 'LIVE' ? '' : String(userId || 'anon'));
+
+    if (executionMode === 'LIVE') {
+      if (!verifiedUser || !verifiedUser.emailVerified) {
+        res.status(401).json({
+          status: 'REJECTED',
+          error: 'Verified Google Sign-In is required before submitting Actual Live broker orders.',
+        });
+        return;
+      }
+    }
+
+    const dedupKey = `${effectiveUserId || 'anon'}:${signalId || contract}:${side}`;
     const lastOrderAt = recentOrderCache.get(dedupKey);
     if (lastOrderAt && Date.now() - lastOrderAt < 60_000) {
       res.status(409).json({
@@ -797,18 +1104,73 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
         res.status(503).json({
           status: 'REJECTED',
           error:
-            'Live broker API credentials are not configured on the server. Keep mode on PAPER TRADING or configure authorized broker adapter credentials.',
+            'No Live Broker / Exness MT5 Bridge credentials are configured on the server. Connect Exness MT5 Bridge via server secrets or switch to your Demo Account.',
         });
         return;
       }
-      // Authorized broker REST dispatch hook would run here when credentials are supplied
-      recentOrderCache.set(dedupKey, Date.now());
-      const liveOrderId = `LIVE-${Date.now().toString(36).toUpperCase()}`;
-      res.json({
-        status: 'SUBMITTED_LIVE',
-        brokerOrderId: liveOrderId,
-        brokerName: String(brokerName || 'Authorized Broker Adapter').slice(0, 80),
-        message: `Live order ${liveOrderId} queued for ${contract} (${quantity} qty @ ${orderType}).`,
+
+      const exnessUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+      const exnessToken = process.env.EXNESS_API_TOKEN?.trim();
+      const brokerLabelStr = String(brokerName || 'Authorized Broker Adapter').slice(0, 80);
+      const wantsExness =
+        Boolean(exnessUrl && exnessToken) &&
+        (brokerLabelStr.toLowerCase().includes('exness') ||
+          !process.env.BROKER_API_KEY);
+
+      if (wantsExness && exnessUrl && exnessToken) {
+        const base = exnessUrl.toString().replace(/\/+$/, '');
+        const bridgeRes = await fetch(`${base}/orders`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${exnessToken}`,
+          },
+          body: JSON.stringify({
+            symbol: String(instrument),
+            contract: String(contract),
+            side: side === 'SELL' ? 'SELL' : 'BUY',
+            orderType: String(orderType || 'MARKET'),
+            volume: Number(quantity),
+            entryPrice: Number(entryPrice),
+            stopLoss: Number(stopLoss),
+            tp1: Number(targetPrice),
+            tp2: target2 ? Number(target2) : undefined,
+            tp3: target3 ? Number(target3) : undefined,
+            accountId: process.env.EXNESS_ACCOUNT_ID?.trim() || undefined,
+            server: process.env.EXNESS_SERVER?.trim() || undefined,
+          }),
+          signal: AbortSignal.timeout(8000),
+        });
+
+        const bridgeJson = (await bridgeRes.json().catch(() => ({}))) as Record<string, unknown>;
+        if (!bridgeRes.ok) {
+          res.status(502).json({
+            status: 'REJECTED',
+            error:
+              (typeof bridgeJson.error === 'string' && bridgeJson.error) ||
+              `Exness MT5 Bridge rejected live order (HTTP ${bridgeRes.status}).`,
+          });
+          return;
+        }
+
+        recentOrderCache.set(dedupKey, Date.now());
+        const liveOrderId =
+          (typeof bridgeJson.orderId === 'string' && bridgeJson.orderId) ||
+          (typeof bridgeJson.ticket === 'number' && `EXN-${bridgeJson.ticket}`) ||
+          `EXN-${Date.now().toString(36).toUpperCase()}`;
+
+        res.json({
+          status: 'SUBMITTED_LIVE',
+          brokerOrderId: liveOrderId,
+          brokerName: 'Exness MT5 Live Bridge',
+          message: `Live order ${liveOrderId} transmitted to Exness MT5 (${side} ${quantity} ${contract}, SL ${stopLoss}, TP1 ${targetPrice}${target2 ? ` / TP2 ${target2}` : ''}${target3 ? ` / TP3 ${target3}` : ''}).`,
+        });
+        return;
+      }
+
+      res.status(501).json({
+        status: 'REJECTED',
+        error: `Direct automated live order transmission is currently enabled for the Exness MT5 Bridge. Configure EXNESS_BRIDGE_URL + EXNESS_API_TOKEN for live execution, or place ${brokerLabelStr} orders in Demo Paper mode.`,
       });
       return;
     }
@@ -819,7 +1181,7 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       status: 'CONFIRMED_PAPER',
       brokerOrderId: paperOrderId,
       brokerName: String(brokerName || 'My Trade Paper Trading Engine').slice(0, 80),
-      message: `Paper order ${paperOrderId} recorded for ${contract} (${side} ${quantity} qty, SL ${stopLoss}, Target ${targetPrice}${expiry ? `, Exp ${expiry}` : ''}).`,
+      message: `Paper order ${paperOrderId} recorded for ${contract} (${side} ${quantity} qty, SL ${stopLoss}, TP1 ${targetPrice}${target2 ? ` · TP2 ${target2}` : ''}${target3 ? ` · TP3 ${target3}` : ''}${expiry ? `, Exp ${expiry}` : ''}).`,
     });
   } catch (err) {
     res.status(500).json({
@@ -827,6 +1189,165 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       error: err instanceof Error ? err.message : 'Order execution error',
     });
   }
+});
+
+app.post('/api/orders/trail-sl', async (req: Request, res: Response) => {
+  try {
+    const verifiedUser = await verifyFirebaseRequestUser(req);
+    if (!verifiedUser || !verifiedUser.emailVerified) {
+      res.status(401).json({ ok: false, error: 'Verified Google Sign-In is required to modify live Stop-Loss orders.' });
+      return;
+    }
+
+    const { brokerOrderId, instrument, newStopLoss, tpStage } = req.body ?? {};
+    if (!brokerOrderId || !Number.isFinite(Number(newStopLoss))) {
+      res.status(400).json({ ok: false, error: 'brokerOrderId and numeric newStopLoss are required.' });
+      return;
+    }
+
+    const exnessUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+    const exnessToken = process.env.EXNESS_API_TOKEN?.trim();
+    if (!exnessUrl || !exnessToken) {
+      res.json({ ok: false, skipped: true, reason: 'No live Exness MT5 bridge configured.' });
+      return;
+    }
+
+    const base = exnessUrl.toString().replace(/\/+$/, '');
+    const modRes = await fetch(`${base}/orders/modify-sl`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${exnessToken}`,
+      },
+      body: JSON.stringify({
+        orderId: String(brokerOrderId),
+        symbol: String(instrument || ''),
+        stopLoss: Number(newStopLoss),
+        tpStage: Number(tpStage) || 1,
+      }),
+      signal: AbortSignal.timeout(8000),
+    });
+
+    res.json({ ok: modRes.ok, status: modRes.status });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to trail SL on Exness bridge.',
+    });
+  }
+});
+
+function sanitizeGuestSessionId(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  return /^[a-zA-Z0-9_-]{8,64}$/.test(trimmed) ? `guest:${trimmed}` : null;
+}
+
+app.post('/api/monitor/positions/sync', async (req: Request, res: Response) => {
+  try {
+    const positions = Array.isArray(req.body?.positions) ? req.body.positions : [];
+    const hasLivePosition = positions.some((p: any) => p?.executionMode === 'LIVE');
+    const verifiedUser = await verifyFirebaseRequestUser(req);
+
+    if (hasLivePosition && (!verifiedUser || !verifiedUser.emailVerified)) {
+      res.status(401).json({
+        ok: false,
+        error: 'Verified Google Sign-In is required to register LIVE positions on the 24/7 server monitor.',
+      });
+      return;
+    }
+
+    const ownerKey = verifiedUser?.uid
+      ? `uid:${verifiedUser.uid}`
+      : sanitizeGuestSessionId(req.body?.sessionId);
+
+    if (!ownerKey) {
+      res.status(400).json({
+        ok: false,
+        error: 'Sign in or provide a valid guest sessionId to sync positions.',
+      });
+      return;
+    }
+
+    const sanitized = positions
+      .filter((p: any) => p && typeof p.tradeId === 'string' && typeof p.instrumentId === 'string')
+      .slice(0, 30)
+      .map((p: any) => ({
+        tradeId: String(p.tradeId).slice(0, 128),
+        instrumentId: String(p.instrumentId).slice(0, 40),
+        symbol: String(p.symbol || p.instrumentId).slice(0, 40),
+        contract: String(p.contract || p.instrumentId).slice(0, 80),
+        direction: p.direction === 'SELL' ? ('SELL' as const) : ('BUY' as const),
+        executionMode:
+          p.executionMode === 'LIVE' && verifiedUser?.emailVerified
+            ? ('LIVE' as const)
+            : ('PAPER' as const),
+        entryPrice: Number(p.entryPrice) || 0,
+        stopLoss: Number(p.stopLoss) || 0,
+        target1: Number(p.target1) || 0,
+        target2: Number(p.target2) || 0,
+        target3: Number(p.target3) || 0,
+        tpStage: ([0, 1, 2].includes(Number(p.tpStage)) ? Number(p.tpStage) : 0) as 0 | 1 | 2,
+        quantity: Math.max(0.0001, Number(p.quantity) || 1),
+        remainingQuantity: Math.max(0, Number(p.remainingQuantity ?? p.quantity) || 0),
+        partialRealizedPnl: Number(p.partialRealizedPnl) || 0,
+        enablePartialProfitBooking: p.enablePartialProfitBooking !== false,
+        brokerOrderId: typeof p.brokerOrderId === 'string' ? p.brokerOrderId.slice(0, 80) : undefined,
+      }));
+
+    const result = syncMonitoredPositions(ownerKey, sanitized);
+    res.json({
+      ok: true,
+      ...result,
+      worker: getGlobalMonitorStats(),
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : 'Position monitor sync failed.',
+    });
+  }
+});
+
+app.get('/api/monitor/positions', async (req: Request, res: Response) => {
+  try {
+    const verifiedUser = await verifyFirebaseRequestUser(req);
+    const ownerKey = verifiedUser?.uid
+      ? `uid:${verifiedUser.uid}`
+      : sanitizeGuestSessionId(req.query.sessionId);
+
+    if (!ownerKey) {
+      res.json({ ok: true, activeCount: 0, positions: [], pendingEvents: [], worker: getGlobalMonitorStats() });
+      return;
+    }
+
+    const status = getMonitoredStatusForOwner(ownerKey);
+    res.json({
+      ok: true,
+      ...status,
+      worker: getGlobalMonitorStats(),
+    });
+  } catch (err) {
+    res.status(500).json({
+      ok: false,
+      error: err instanceof Error ? err.message : 'Failed to read monitored positions.',
+    });
+  }
+});
+
+app.delete('/api/monitor/positions/:tradeId', async (req: Request, res: Response) => {
+  const verifiedUser = await verifyFirebaseRequestUser(req);
+  const ownerKey = verifiedUser?.uid
+    ? `uid:${verifiedUser.uid}`
+    : sanitizeGuestSessionId(req.query.sessionId);
+
+  if (!ownerKey) {
+    res.status(401).json({ ok: false, error: 'Unauthorized monitor removal request.' });
+    return;
+  }
+
+  const removed = removeMonitoredPosition(ownerKey, String(req.params.tradeId || '').slice(0, 128));
+  res.json({ ok: true, removed });
 });
 
 async function startServer() {
@@ -881,9 +1402,10 @@ async function startServer() {
   }
 
   attachBinanceWsHub(httpServer);
+  startPositionMonitorWorker();
 
   httpServer.listen(PORT, '0.0.0.0', () => {
-    console.log(`My Trade server + /ws/market listening on http://0.0.0.0:${PORT}`);
+    console.log(`My Trade server + /ws/market + 24/7 SL Monitor listening on http://0.0.0.0:${PORT}`);
     void prewarmPriorityFeeds();
     const keepWarmTimer = setInterval(() => {
       void prewarmPriorityFeeds();

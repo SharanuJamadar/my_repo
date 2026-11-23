@@ -7,7 +7,11 @@ import {
   type PineParsedSummary,
   type Timeframe,
 } from '../src/types/trading.ts';
-import { fetchLiveMarketQuote, getInstrumentById } from './marketData.ts';
+import {
+  estimateSegmentSpreadBps,
+  fetchLiveMarketQuote,
+  getInstrumentById,
+} from './marketData.ts';
 
 interface SeriesMap {
   [name: string]: number[];
@@ -90,6 +94,164 @@ function calcAtrArr(candles: CandleBar[], period: number): number[] {
     );
   });
   return calcSmaArr(trs, n);
+}
+
+function calcAdxArr(candles: CandleBar[], period: number): number[] {
+  const n = Math.max(2, Math.round(period));
+  const out = new Array<number>(candles.length).fill(NaN);
+  if (candles.length <= n * 2) return out;
+
+  const tr: number[] = new Array<number>(candles.length).fill(0);
+  const plusDm: number[] = new Array<number>(candles.length).fill(0);
+  const minusDm: number[] = new Array<number>(candles.length).fill(0);
+
+  for (let i = 1; i < candles.length; i++) {
+    const upMove = candles[i].high - candles[i - 1].high;
+    const downMove = candles[i - 1].low - candles[i].low;
+    plusDm[i] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDm[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+    tr[i] = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close)
+    );
+  }
+
+  let smTr = 0;
+  let smPlus = 0;
+  let smMinus = 0;
+  for (let i = 1; i <= n; i++) {
+    smTr += tr[i];
+    smPlus += plusDm[i];
+    smMinus += minusDm[i];
+  }
+
+  const dxArr = new Array<number>(candles.length).fill(NaN);
+  for (let i = n; i < candles.length; i++) {
+    if (i > n) {
+      smTr = smTr - smTr / n + tr[i];
+      smPlus = smPlus - smPlus / n + plusDm[i];
+      smMinus = smMinus - smMinus / n + minusDm[i];
+    }
+    const pdi = smTr > 0 ? (100 * smPlus) / smTr : 0;
+    const mdi = smTr > 0 ? (100 * smMinus) / smTr : 0;
+    const denom = pdi + mdi;
+    dxArr[i] = denom > 0 ? (100 * Math.abs(pdi - mdi)) / denom : 0;
+  }
+
+  let adxSum = 0;
+  let count = 0;
+  for (let i = n; i < candles.length; i++) {
+    if (!Number.isFinite(dxArr[i])) continue;
+    if (count < n) {
+      adxSum += dxArr[i];
+      count++;
+      if (count === n) out[i] = adxSum / n;
+    } else if (Number.isFinite(out[i - 1])) {
+      out[i] = (out[i - 1] * (n - 1) + dxArr[i]) / n;
+    }
+  }
+  return out;
+}
+
+function calcSupertrendTuple(
+  candles: CandleBar[],
+  factor: number,
+  atrPeriod: number
+): { supertrend: number[]; dir: number[] } {
+  const atr = calcAtrArr(candles, atrPeriod);
+  const mult = Math.max(0.5, factor || 2.5);
+  const supertrend = new Array<number>(candles.length).fill(NaN);
+  const dir = new Array<number>(candles.length).fill(1);
+  if (candles.length === 0) return { supertrend, dir };
+
+  let finalUpper = candles[0].high;
+  let finalLower = candles[0].low;
+  let prevDir = 1;
+
+  for (let i = 0; i < candles.length; i++) {
+    const a = Number.isFinite(atr[i]) ? atr[i] : candles[i].high - candles[i].low;
+    const hl2 = (candles[i].high + candles[i].low) / 2;
+    const basicUpper = hl2 + mult * a;
+    const basicLower = hl2 - mult * a;
+
+    if (i === 0) {
+      finalUpper = basicUpper;
+      finalLower = basicLower;
+      dir[0] = 1;
+      supertrend[0] = finalLower;
+      continue;
+    }
+
+    const prevClose = candles[i - 1].close;
+    finalUpper = basicUpper < finalUpper || prevClose > finalUpper ? basicUpper : finalUpper;
+    finalLower = basicLower > finalLower || prevClose < finalLower ? basicLower : finalLower;
+
+    let nextDir = prevDir;
+    if (prevDir === -1 && candles[i].close > finalUpper) {
+      nextDir = 1;
+    } else if (prevDir === 1 && candles[i].close < finalLower) {
+      nextDir = -1;
+    }
+    prevDir = nextDir;
+    dir[i] = nextDir;
+    supertrend[i] = nextDir === 1 ? finalLower : finalUpper;
+  }
+
+  return { supertrend, dir };
+}
+
+function calcBbTuple(
+  values: number[],
+  period: number,
+  mult: number
+): { middle: number[]; upper: number[]; lower: number[] } {
+  const n = Math.max(2, Math.round(period));
+  const m = Math.max(0.2, mult || 2);
+  const middle = calcSmaArr(values, n);
+  const upper = new Array<number>(values.length).fill(NaN);
+  const lower = new Array<number>(values.length).fill(NaN);
+
+  for (let i = n - 1; i < values.length; i++) {
+    const mean = middle[i];
+    if (!Number.isFinite(mean)) continue;
+    let sq = 0;
+    for (let j = i - n + 1; j <= i; j++) {
+      const d = values[j] - mean;
+      sq += d * d;
+    }
+    const std = Math.sqrt(sq / n);
+    upper[i] = mean + m * std;
+    lower[i] = mean - m * std;
+  }
+
+  return { middle, upper, lower };
+}
+
+function calcRisingArr(values: number[], period: number): number[] {
+  const n = Math.max(1, Math.round(period));
+  return values.map((_, i) => {
+    if (i < n) return 0;
+    for (let j = i - n + 1; j <= i; j++) {
+      if (!Number.isFinite(values[j]) || !Number.isFinite(values[j - 1]) || values[j] <= values[j - 1]) {
+        return 0;
+      }
+    }
+    return 1;
+  });
+}
+
+function calcFallingArr(values: number[], period: number): number[] {
+  const n = Math.max(1, Math.round(period));
+  return values.map((_, i) => {
+    if (i < n) return 0;
+    for (let j = i - n + 1; j <= i; j++) {
+      if (!Number.isFinite(values[j]) || !Number.isFinite(values[j - 1]) || values[j] >= values[j - 1]) {
+        return 0;
+      }
+    }
+    return 1;
+  });
 }
 
 function calcHighestArr(values: number[], period: number): number[] {
@@ -250,11 +412,12 @@ function evalNumericToken(
   }
 
   // Built-in function call directly inside condition e.g. ta.ema(close, 9)
-  const fnMatch = expr.match(/^(?:ta\.)?(ema|sma|rsi|atr|highest|lowest)\((.+)\)$/);
+  const fnMatch = expr.match(/^(?:ta\.)?(ema|sma|rsi|atr|adx|highest|lowest)\((.+)\)$/);
   if (fnMatch) {
     const fn = fnMatch[1];
     const args = splitTopLevelArgs(fnMatch[2]);
-    const period = args.length >= 2 ? Number(scalars.get(args[1]) ?? args[1]) : Number(scalars.get(args[0]) ?? args[0]);
+    const rawPeriod = args.length >= 2 ? args[1] : args[0];
+    const period = Number(scalars.get(rawPeriod) ?? rawPeriod);
     const cacheKey = `__inline_${fn}_${args[0]}_${period}`;
     if (series[cacheKey]) {
       return series[cacheKey][barIdx] ?? NaN;
@@ -349,6 +512,30 @@ function evalBooleanExpr(
     return !evalBooleanExpr(expr.slice(4), barIdx, series, scalars, boolVars);
   }
 
+  // ta.rising(src, len) & ta.falling(src, len)
+  const trendMatch = expr.match(/^(?:ta\.)?(rising|falling)\((.+)\)$/);
+  if (trendMatch) {
+    const args = splitTopLevelArgs(trendMatch[2]);
+    if (args.length >= 2) {
+      const len = Math.max(1, Math.round(Number(scalars.get(args[1]) ?? args[1]) || 1));
+      const cacheKey = `__inline_${trendMatch[1]}_${args[0]}_${len}`;
+      if (series[cacheKey]) {
+        return series[cacheKey][barIdx] === 1;
+      }
+      if (series[args[0]]) {
+        if (barIdx < len) return false;
+        const arr = series[args[0]];
+        for (let j = barIdx - len + 1; j <= barIdx; j++) {
+          if (!Number.isFinite(arr[j]) || !Number.isFinite(arr[j - 1])) return false;
+          if (trendMatch[1] === 'rising' && arr[j] <= arr[j - 1]) return false;
+          if (trendMatch[1] === 'falling' && arr[j] >= arr[j - 1]) return false;
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
   // ta.crossover(a, b) & ta.crossunder(a, b)
   const crossMatch = expr.match(/^(?:ta\.)?(crossover|crossunder)\((.+)\)$/);
   if (crossMatch) {
@@ -440,13 +627,13 @@ function buildPineExecutionContext(
   let longExpr: string | null = null;
   let shortExpr: string | null = null;
 
-  // Check raw version comment first
   const verMatch = pineCode.match(/\/\/@version=(\d+)/);
   if (verMatch) pineVersion = `v${verMatch[1]}`;
 
-  const resolveSrc = (arg?: string): number[] => {
-    const clean = (arg || 'close').trim();
-    return series[clean] || closes;
+  const resolveSrc = (arg?: string, fallback: number[] = closes): number[] => {
+    const clean = (arg || '').trim();
+    if (!clean) return fallback;
+    return series[clean] || fallback;
   };
 
   const resolveNum = (arg: string | undefined, fallback: number): number => {
@@ -458,12 +645,19 @@ function buildPineExecutionContext(
   };
 
   const registerInlineCalls = (expr: string) => {
-    const regex = /(?:ta\.)?(ema|sma|rsi|atr|highest|lowest)\(([^()]+)\)/g;
+    const regex = /(?:ta\.)?(ema|sma|rsi|atr|adx|highest|lowest|rising|falling)\(([^()]+)\)/g;
     let m: RegExpExecArray | null;
     while ((m = regex.exec(expr)) !== null) {
       const fn = m[1];
       const args = splitTopLevelArgs(m[2]);
-      const src = args.length >= 2 ? resolveSrc(args[0]) : closes;
+      const src =
+        args.length >= 2
+          ? resolveSrc(args[0], fn === 'highest' ? highs : fn === 'lowest' ? lows : closes)
+          : fn === 'highest'
+            ? highs
+            : fn === 'lowest'
+              ? lows
+              : closes;
       const period = args.length >= 2 ? resolveNum(args[1], 14) : resolveNum(args[0], 14);
       const cacheKey = `__inline_${fn}_${args[0]}_${period}`;
       if (!series[cacheKey]) {
@@ -471,8 +665,11 @@ function buildPineExecutionContext(
         else if (fn === 'sma') series[cacheKey] = calcSmaArr(src, period);
         else if (fn === 'rsi') series[cacheKey] = calcRsiArr(src, period);
         else if (fn === 'atr') series[cacheKey] = calcAtrArr(candles, period);
-        else if (fn === 'highest') series[cacheKey] = calcHighestArr(highs, period);
-        else if (fn === 'lowest') series[cacheKey] = calcLowestArr(lows, period);
+        else if (fn === 'adx') series[cacheKey] = calcAdxArr(candles, period);
+        else if (fn === 'highest') series[cacheKey] = calcHighestArr(src, period);
+        else if (fn === 'lowest') series[cacheKey] = calcLowestArr(src, period);
+        else if (fn === 'rising') series[cacheKey] = calcRisingArr(src, period);
+        else if (fn === 'falling') series[cacheKey] = calcFallingArr(src, period);
         indicatorsDetected.push(`${fn.toUpperCase()}(${period})`);
       }
     }
@@ -483,19 +680,22 @@ function buildPineExecutionContext(
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // strategy("Title", ...) or indicator("Title", ...)
     const headerMatch = line.match(/^(?:strategy|indicator|study)\(\s*["']([^"']+)["']/);
     if (headerMatch) {
       scriptTitle = headerMatch[1];
       continue;
     }
 
-    // Tuple assignment e.g. [macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
+    // Tuple assignments: ta.macd, ta.supertrend, ta.bb
     const tupleMatch = line.match(/^\[([^\]]+)\]\s*=\s*(.+)$/);
     if (tupleMatch) {
       const names = tupleMatch[1].split(',').map((s) => s.trim());
       const rhs = tupleMatch[2].trim();
+
       const macdCall = rhs.match(/^(?:ta\.)?macd\((.+)\)$/);
+      const stCall = rhs.match(/^(?:ta\.)?supertrend\((.+)\)$/);
+      const bbCall = rhs.match(/^(?:ta\.)?bb\((.+)\)$/);
+
       if (macdCall) {
         const args = splitTopLevelArgs(macdCall[1]);
         const src = resolveSrc(args[0]);
@@ -507,6 +707,39 @@ function buildPineExecutionContext(
         if (names[1] && names[1] !== '_') series[names[1]] = signal;
         if (names[2] && names[2] !== '_') series[names[2]] = hist;
         indicatorsDetected.push(`MACD(${fastLen},${slowLen},${sigLen})`);
+      } else if (stCall) {
+        const args = splitTopLevelArgs(stCall[1]);
+        const factor = resolveNum(args[0], 2.5);
+        const atrPeriod = resolveNum(args[1], 10);
+        const { supertrend, dir } = calcSupertrendTuple(candles, factor, atrPeriod);
+        if (names[0] && names[0] !== '_') {
+          series[names[0]] = supertrend;
+          overlays.push({
+            label: `Supertrend (${factor}, ${atrPeriod})`,
+            color: '#22D3EE',
+            seriesKey: names[0],
+          });
+        }
+        if (names[1] && names[1] !== '_') {
+          series[names[1]] = dir;
+        }
+        indicatorsDetected.push(`Supertrend(${factor},${atrPeriod})`);
+      } else if (bbCall) {
+        const args = splitTopLevelArgs(bbCall[1]);
+        const src = resolveSrc(args[0]);
+        const len = resolveNum(args[1], 20);
+        const mult = resolveNum(args[2], 2);
+        const { middle, upper, lower } = calcBbTuple(src, len, mult);
+        if (names[0] && names[0] !== '_') series[names[0]] = middle;
+        if (names[1] && names[1] !== '_') {
+          series[names[1]] = upper;
+          overlays.push({ label: `BB Upper (${len})`, color: '#A855F7', seriesKey: names[1] });
+        }
+        if (names[2] && names[2] !== '_') {
+          series[names[2]] = lower;
+          overlays.push({ label: `BB Lower (${len})`, color: '#A855F7', seriesKey: names[2] });
+        }
+        indicatorsDetected.push(`BB(${len},${mult})`);
       } else {
         unsupportedConstructs.push(`Tuple assignment skipped: ${line.slice(0, 60)}`);
       }
@@ -519,7 +752,6 @@ function buildPineExecutionContext(
       const varName = assignMatch[1];
       const rhs = assignMatch[2].trim();
 
-      // input.int(9, ...) / input.float(55, ...) / input(9, ...)
       const inputMatch = rhs.match(/^input(?:\.(?:int|float))?\(([^,)]+)/);
       if (inputMatch) {
         const val = Number(inputMatch[1].trim());
@@ -527,18 +759,23 @@ function buildPineExecutionContext(
         continue;
       }
 
-      // Numeric literal
       if (/^-?\d+(\.\d+)?$/.test(rhs)) {
         scalars.set(varName, Number(rhs));
         continue;
       }
 
-      // Built-in indicator assignment
-      const fnMatch = rhs.match(/^(?:ta\.)?(ema|sma|rsi|atr|highest|lowest)\((.+)\)$/);
+      const fnMatch = rhs.match(/^(?:ta\.)?(ema|sma|rsi|atr|adx|highest|lowest)\((.+)\)$/);
       if (fnMatch) {
         const fn = fnMatch[1];
         const args = splitTopLevelArgs(fnMatch[2]);
-        const src = args.length >= 2 ? resolveSrc(args[0]) : closes;
+        const src =
+          args.length >= 2
+            ? resolveSrc(args[0], fn === 'highest' ? highs : fn === 'lowest' ? lows : closes)
+            : fn === 'highest'
+              ? highs
+              : fn === 'lowest'
+                ? lows
+                : closes;
         const period = args.length >= 2 ? resolveNum(args[1], 14) : resolveNum(args[0], 14);
         if (fn === 'ema') {
           series[varName] = calcEmaArr(src, period);
@@ -562,11 +799,14 @@ function buildPineExecutionContext(
         } else if (fn === 'atr') {
           series[varName] = calcAtrArr(candles, period);
           indicatorsDetected.push(`ATR(${period})`);
+        } else if (fn === 'adx') {
+          series[varName] = calcAdxArr(candles, period);
+          indicatorsDetected.push(`ADX(${period})`);
         } else if (fn === 'highest') {
-          series[varName] = calcHighestArr(highs, period);
+          series[varName] = calcHighestArr(src, period);
           indicatorsDetected.push(`Highest(${period})`);
         } else if (fn === 'lowest') {
-          series[varName] = calcLowestArr(lows, period);
+          series[varName] = calcLowestArr(src, period);
           indicatorsDetected.push(`Lowest(${period})`);
         }
         continue;
@@ -579,7 +819,7 @@ function buildPineExecutionContext(
         continue;
       }
 
-      // Otherwise treat as boolean condition expression
+      // Treat as boolean condition expression
       registerInlineCalls(rhs);
       boolVars.set(varName, rhs);
       const lowerName = varName.toLowerCase();
@@ -591,7 +831,6 @@ function buildPineExecutionContext(
       continue;
     }
 
-    // Inline `if (cond)` followed by `strategy.entry(...)` on same line or next line
     const inlineIfMatch = line.match(/^if\s*\(?(.+?)\)?\s*(strategy\.entry\(.+\))?$/);
     if (inlineIfMatch) {
       const cond = inlineIfMatch[1].replace(/\)$/, '').trim();
@@ -610,7 +849,6 @@ function buildPineExecutionContext(
       }
     }
 
-    // `strategy.entry("Long", strategy.long, when = cond)`
     const whenMatch = line.match(/strategy\.entry\([^)]*strategy\.(long|short)[^)]*when\s*=\s*([^,)]+)/);
     if (whenMatch) {
       registerInlineCalls(whenMatch[2]);
@@ -631,7 +869,6 @@ function buildPineExecutionContext(
     }
   }
 
-  // Fallback overlays from SHARAN core if user pasted an EMA-based strategy without explicit variable overlays
   if (overlays.length === 0) {
     series.ema9 = calcEmaArr(closes, 9);
     series.ema20 = calcEmaArr(closes, 20);
@@ -641,11 +878,11 @@ function buildPineExecutionContext(
     );
   }
 
-  // Register standard aliases if referenced implicitly in rules without variable declarations
   if (!series.ema9) series.ema9 = calcEmaArr(closes, 9);
   if (!series.ema20) series.ema20 = calcEmaArr(closes, 20);
   if (!series.ema50) series.ema50 = calcEmaArr(closes, 50);
   if (!series.rsi14) series.rsi14 = calcRsiArr(closes, 14);
+  if (!series.adx14) series.adx14 = calcAdxArr(candles, 14);
 
   return {
     ctx: {
@@ -653,8 +890,12 @@ function buildPineExecutionContext(
         scriptTitle,
         pineVersion,
         indicatorsDetected: Array.from(new Set(indicatorsDetected)),
-        buyRuleSummary: longExpr ? `strategy.long when: ${boolVars.get(longExpr) || longExpr}` : 'No BUY/long entry expression detected',
-        sellRuleSummary: shortExpr ? `strategy.short when: ${boolVars.get(shortExpr) || shortExpr}` : 'No SELL/short entry expression detected',
+        buyRuleSummary: longExpr
+          ? `strategy.long when: ${boolVars.get(longExpr) || longExpr}`
+          : 'No BUY/long entry expression detected',
+        sellRuleSummary: shortExpr
+          ? `strategy.short when: ${boolVars.get(shortExpr) || shortExpr}`
+          : 'No SELL/short entry expression detected',
         unsupportedConstructs: Array.from(new Set(unsupportedConstructs)),
       },
       series,
@@ -667,6 +908,60 @@ function buildPineExecutionContext(
   };
 }
 
+function computePositionQuantity(params: {
+  equity: number;
+  entryPrice: number;
+  slDistance: number;
+  fixedQuantity: number;
+  riskPerTradePct?: number;
+}): number {
+  const riskPct = Number(params.riskPerTradePct ?? 0);
+  if (!Number.isFinite(riskPct) || riskPct <= 0 || params.slDistance <= 0) {
+    return Math.max(0.01, params.fixedQuantity);
+  }
+  const riskCapital = params.equity * (Math.min(riskPct, 10) / 100);
+  const rawQty = riskCapital / Math.max(params.slDistance, params.entryPrice * 0.001);
+  // Keep effective leverage capped realistically (6x max notional exposure per trade)
+  const maxNotionalQty = (params.equity * 6) / Math.max(params.entryPrice, 1e-6);
+  const bounded = Math.max(0.01, Math.min(rawQty, maxNotionalQty));
+  return bounded >= 10 ? Math.round(bounded) : Number(bounded.toFixed(2));
+}
+
+function computeThreeTpLevels(
+  side: 'BUY' | 'SELL',
+  entryPrice: number,
+  slPct: number,
+  tpPct: number
+): {
+  stopLoss: number;
+  tp1: number;
+  tp2: number;
+  tp3: number;
+  slDist: number;
+} {
+  const slDist = entryPrice * (slPct / 100);
+  const tp3Dist = Math.max(slDist * 2.4, entryPrice * (tpPct / 100));
+  const tp1Dist = Math.max(slDist * 1.0, tp3Dist * 0.42);
+  const tp2Dist = Math.max(slDist * 1.75, tp3Dist * 0.72);
+
+  if (side === 'BUY') {
+    return {
+      stopLoss: entryPrice - slDist,
+      tp1: entryPrice + tp1Dist,
+      tp2: entryPrice + tp2Dist,
+      tp3: entryPrice + tp3Dist,
+      slDist,
+    };
+  }
+  return {
+    stopLoss: entryPrice + slDist,
+    tp1: entryPrice - tp1Dist,
+    tp2: entryPrice - tp2Dist,
+    tp3: entryPrice - tp3Dist,
+    slDist,
+  };
+}
+
 export async function runPineBacktest(params: {
   strategyName?: string;
   instrumentId: string;
@@ -676,6 +971,8 @@ export async function runPineBacktest(params: {
   initialCapital: number;
   stopLossPct: number;
   takeProfitPct: number;
+  riskPerTradePct?: number;
+  trailingStop?: boolean;
 }): Promise<PineBacktestResult> {
   const instrument = getInstrumentById(params.instrumentId);
   const quote = await fetchLiveMarketQuote(instrument.id, params.timeframe);
@@ -721,27 +1018,38 @@ export async function runPineBacktest(params: {
 
   const candles = quote.candles;
   const { ctx, scalars, boolVars } = buildPineExecutionContext(params.pineCode, candles);
-  const qty = Math.max(0.01, Number(params.quantity) || 1);
+  const baseQty = Math.max(0.01, Number(params.quantity) || 1);
   const initialCap = Math.max(100, Number(params.initialCapital) || 100_000);
-  const slPct = Math.max(0.05, Number(params.stopLossPct) || 0.6);
-  const tpPct = Math.max(0.05, Number(params.takeProfitPct) || 1.2);
+  const slPct = Math.max(0.05, Number(params.stopLossPct) || 0.55);
+  const tpPct = Math.max(0.05, Number(params.takeProfitPct) || 1.65);
+  const riskPct = params.riskPerTradePct !== undefined ? Number(params.riskPerTradePct) : 2.5;
+  const trailingEnabled = params.trailingStop !== false;
+  const spreadBpsModeled = quote.spreadBps ?? estimateSegmentSpreadBps(instrument);
+  const commissionBpsRoundTrip = 2.0; // Realistic 0.01% per side brokerage/exchange fee
+  const totalCostRate = (spreadBpsModeled + commissionBpsRoundTrip) / 10_000;
 
   let equity = initialCap;
   let peakEquity = initialCap;
   let maxDrawdownPct = 0;
+  let totalCosts = 0;
 
   let openPos: {
     side: 'BUY' | 'SELL';
     entryTime: number;
     entryPrice: number;
+    qty: number;
     sl: number;
-    tp: number;
+    tp1: number;
+    tp2: number;
+    tp3: number;
+    tpReached: 0 | 1 | 2;
+    slDist: number;
   } | null = null;
 
   const trades: PineBacktestTrade[] = [];
   const equityCurve: { time: number; equity: number }[] = [];
 
-  const warmup = Math.min(20, Math.floor(candles.length * 0.2));
+  const warmup = Math.min(30, Math.floor(candles.length * 0.2));
 
   for (let i = 0; i < candles.length; i++) {
     const bar = candles[i];
@@ -754,30 +1062,49 @@ export async function runPineBacktest(params: {
         ? evalBooleanExpr(ctx.shortExpr, i, ctx.series, scalars, boolVars)
         : false;
 
-      // 1. Check stop-loss / take-profit / reversal on open position
+      // 1. Check stop-loss / 3-TP stepped trailing / full TP3 target / reversal on open position
       if (openPos) {
         let exitPrice: number | null = null;
         let exitReason: PineBacktestTrade['exitReason'] | null = null;
+        let finalTpReached: 0 | 1 | 2 | 3 = openPos.tpReached;
 
         if (openPos.side === 'BUY') {
           if (bar.low <= openPos.sl) {
             exitPrice = openPos.sl;
-            exitReason = 'STOP_LOSS';
-          } else if (bar.high >= openPos.tp) {
-            exitPrice = openPos.tp;
-            exitReason = 'TAKE_PROFIT';
-          } else if (shortSig && !longSig) {
+            exitReason =
+              openPos.tpReached === 2
+                ? 'TRAIL_SL_TP2'
+                : openPos.tpReached === 1
+                  ? 'TRAIL_SL_TP1'
+                  : 'STOP_LOSS';
+          } else if (bar.high >= openPos.tp3) {
+            exitPrice = openPos.tp3;
+            exitReason = 'TP3_TARGET';
+            finalTpReached = 3;
+            if (trailingEnabled) {
+              openPos.sl = Math.max(openPos.sl, openPos.tp2);
+            }
+          } else if (shortSig && !longSig && openPos.tpReached === 0) {
             exitPrice = bar.close;
             exitReason = 'SIGNAL_REVERSE';
           }
         } else {
           if (bar.high >= openPos.sl) {
             exitPrice = openPos.sl;
-            exitReason = 'STOP_LOSS';
-          } else if (bar.low <= openPos.tp) {
-            exitPrice = openPos.tp;
-            exitReason = 'TAKE_PROFIT';
-          } else if (longSig && !shortSig) {
+            exitReason =
+              openPos.tpReached === 2
+                ? 'TRAIL_SL_TP2'
+                : openPos.tpReached === 1
+                  ? 'TRAIL_SL_TP1'
+                  : 'STOP_LOSS';
+          } else if (bar.low <= openPos.tp3) {
+            exitPrice = openPos.tp3;
+            exitReason = 'TP3_TARGET';
+            finalTpReached = 3;
+            if (trailingEnabled) {
+              openPos.sl = Math.min(openPos.sl, openPos.tp2);
+            }
+          } else if (longSig && !shortSig && openPos.tpReached === 0) {
             exitPrice = bar.close;
             exitReason = 'SIGNAL_REVERSE';
           }
@@ -788,9 +1115,25 @@ export async function runPineBacktest(params: {
             openPos.side === 'BUY'
               ? exitPrice - openPos.entryPrice
               : openPos.entryPrice - exitPrice;
-          const pnl = Number((diff * qty).toFixed(2));
-          const returnPct = Number(((diff / Math.max(openPos.entryPrice, 1e-6)) * 100).toFixed(2));
+          const grossPnl = diff * openPos.qty;
+          const tradeCost = Number(
+            (openPos.entryPrice * openPos.qty * totalCostRate).toFixed(2)
+          );
+          totalCosts += tradeCost;
+          const pnl = Number((grossPnl - tradeCost).toFixed(2));
+          const returnPct = Number(
+            (((grossPnl - tradeCost) / Math.max(openPos.entryPrice * openPos.qty, 1e-6)) * 100).toFixed(2)
+          );
           equity = Number((equity + pnl).toFixed(2));
+
+          const reasonNote =
+            exitReason === 'TP3_TARGET'
+              ? 'TP3 Full Target Hit (3/3 TPs)'
+              : exitReason === 'TRAIL_SL_TP2'
+                ? 'Trailed SL locked at TP1 after TP2 hit'
+                : exitReason === 'TRAIL_SL_TP1'
+                  ? 'Trailed SL locked at Breakeven after TP1 hit'
+                  : exitReason.replaceAll('_', ' ');
 
           trades.push({
             id: `bt-${trades.length + 1}`,
@@ -799,33 +1142,84 @@ export async function runPineBacktest(params: {
             exitTime: bar.time,
             entryPrice: Number(openPos.entryPrice.toFixed(4)),
             exitPrice: Number(exitPrice.toFixed(4)),
-            quantity: qty,
+            quantity: openPos.qty,
             pnl,
+            costs: tradeCost,
             returnPct,
+            tp1Price: Number(openPos.tp1.toFixed(4)),
+            tp2Price: Number(openPos.tp2.toFixed(4)),
+            tp3Price: Number(openPos.tp3.toFixed(4)),
+            tpReached: finalTpReached,
+            trailedStopLoss: Number(openPos.sl.toFixed(4)),
             exitReason,
-            note: `${exitReason.replace('_', ' ')} · Qty ${qty}`,
+            note: `${reasonNote} · Qty ${openPos.qty} · Net after spread/fee`,
           });
           openPos = null;
+        } else if (trailingEnabled && openPos) {
+          // Stepped SL Trailing at every TP range hit (no future bar peeking)
+          if (openPos.side === 'BUY') {
+            if (bar.high >= openPos.tp2 && openPos.tpReached < 2) {
+              openPos.tpReached = 2;
+              openPos.sl = Math.max(openPos.sl, openPos.tp1);
+            } else if (bar.high >= openPos.tp1 && openPos.tpReached < 1) {
+              openPos.tpReached = 1;
+              openPos.sl = Math.max(openPos.sl, openPos.entryPrice + 0.05 * openPos.slDist);
+            }
+          } else {
+            if (bar.low <= openPos.tp2 && openPos.tpReached < 2) {
+              openPos.tpReached = 2;
+              openPos.sl = Math.min(openPos.sl, openPos.tp1);
+            } else if (bar.low <= openPos.tp1 && openPos.tpReached < 1) {
+              openPos.tpReached = 1;
+              openPos.sl = Math.min(openPos.sl, openPos.entryPrice - 0.05 * openPos.slDist);
+            }
+          }
         }
       }
 
       // 2. Open new position if flat and signal triggers
-      if (!openPos) {
+      if (!openPos && equity > 0) {
         if (longSig && !shortSig) {
+          const levels = computeThreeTpLevels('BUY', bar.close, slPct, tpPct);
+          const posQty = computePositionQuantity({
+            equity,
+            entryPrice: bar.close,
+            slDistance: levels.slDist,
+            fixedQuantity: baseQty,
+            riskPerTradePct: riskPct,
+          });
           openPos = {
             side: 'BUY',
             entryTime: bar.time,
             entryPrice: bar.close,
-            sl: bar.close * (1 - slPct / 100),
-            tp: bar.close * (1 + tpPct / 100),
+            qty: posQty,
+            sl: levels.stopLoss,
+            tp1: levels.tp1,
+            tp2: levels.tp2,
+            tp3: levels.tp3,
+            tpReached: 0,
+            slDist: levels.slDist,
           };
         } else if (shortSig && !longSig) {
+          const levels = computeThreeTpLevels('SELL', bar.close, slPct, tpPct);
+          const posQty = computePositionQuantity({
+            equity,
+            entryPrice: bar.close,
+            slDistance: levels.slDist,
+            fixedQuantity: baseQty,
+            riskPerTradePct: riskPct,
+          });
           openPos = {
             side: 'SELL',
             entryTime: bar.time,
             entryPrice: bar.close,
-            sl: bar.close * (1 + slPct / 100),
-            tp: bar.close * (1 - tpPct / 100),
+            qty: posQty,
+            sl: levels.stopLoss,
+            tp1: levels.tp1,
+            tp2: levels.tp2,
+            tp3: levels.tp3,
+            tpReached: 0,
+            slDist: levels.slDist,
           };
         }
       }
@@ -836,8 +1230,8 @@ export async function runPineBacktest(params: {
     if (openPos) {
       const unreal =
         openPos.side === 'BUY'
-          ? (bar.close - openPos.entryPrice) * qty
-          : (openPos.entryPrice - bar.close) * qty;
+          ? (bar.close - openPos.entryPrice) * openPos.qty
+          : (openPos.entryPrice - bar.close) * openPos.qty;
       markEquity = equity + unreal;
     }
     peakEquity = Math.max(peakEquity, markEquity);
@@ -855,8 +1249,13 @@ export async function runPineBacktest(params: {
       openPos.side === 'BUY'
         ? lastBar.close - openPos.entryPrice
         : openPos.entryPrice - lastBar.close;
-    const pnl = Number((diff * qty).toFixed(2));
-    const returnPct = Number(((diff / Math.max(openPos.entryPrice, 1e-6)) * 100).toFixed(2));
+    const grossPnl = diff * openPos.qty;
+    const tradeCost = Number((openPos.entryPrice * openPos.qty * totalCostRate).toFixed(2));
+    totalCosts += tradeCost;
+    const pnl = Number((grossPnl - tradeCost).toFixed(2));
+    const returnPct = Number(
+      (((grossPnl - tradeCost) / Math.max(openPos.entryPrice * openPos.qty, 1e-6)) * 100).toFixed(2)
+    );
     equity = Number((equity + pnl).toFixed(2));
     trades.push({
       id: `bt-${trades.length + 1}`,
@@ -865,11 +1264,17 @@ export async function runPineBacktest(params: {
       exitTime: lastBar.time,
       entryPrice: Number(openPos.entryPrice.toFixed(4)),
       exitPrice: Number(lastBar.close.toFixed(4)),
-      quantity: qty,
+      quantity: openPos.qty,
       pnl,
+      costs: tradeCost,
       returnPct,
+      tp1Price: Number(openPos.tp1.toFixed(4)),
+      tp2Price: Number(openPos.tp2.toFixed(4)),
+      tp3Price: Number(openPos.tp3.toFixed(4)),
+      tpReached: openPos.tpReached,
+      trailedStopLoss: Number(openPos.sl.toFixed(4)),
       exitReason: 'END_OF_SERIES',
-      note: `Marked at latest close · Qty ${qty}`,
+      note: `Marked at latest close (TP Stage ${openPos.tpReached}/3) · Qty ${openPos.qty}`,
     });
   }
 
@@ -924,6 +1329,8 @@ export async function runPineBacktest(params: {
       maxDrawdownPct: Number(maxDrawdownPct.toFixed(2)),
       avgWin: wins.length > 0 ? Number((grossWin / wins.length).toFixed(2)) : 0,
       avgLoss: losses.length > 0 ? Number((grossLoss / losses.length).toFixed(2)) : 0,
+      totalCosts: Number(totalCosts.toFixed(2)),
+      spreadBpsModeled: Number(spreadBpsModeled.toFixed(2)),
     },
   };
 }
@@ -956,6 +1363,7 @@ export async function evaluatePineStrategyLive(params: {
       stopLoss: 0,
       target1: 0,
       target2: 0,
+      target3: 0,
       reason: 'Market feed unavailable.',
       indicatorSnapshot: {},
       parsed: {
@@ -984,23 +1392,19 @@ export async function evaluatePineStrategyLive(params: {
     longNow && !shortNow ? 'BUY' : shortNow && !longNow ? 'SELL' : 'HOLD';
 
   const price = quote.price;
-  const slPct = Math.max(0.05, Number(params.stopLossPct) || 0.6);
-  const tpPct = Math.max(0.05, Number(params.takeProfitPct) || 1.2);
+  const slPct = Math.max(0.05, Number(params.stopLossPct) || 0.55);
+  const tpPct = Math.max(0.05, Number(params.takeProfitPct) || 1.65);
 
-  const stopLoss =
-    action === 'BUY'
-      ? Number((price * (1 - slPct / 100)).toFixed(4))
-      : action === 'SELL'
-        ? Number((price * (1 + slPct / 100)).toFixed(4))
-        : Number((price * (1 - slPct / 100)).toFixed(4));
-  const target1 =
-    action === 'BUY'
-      ? Number((price * (1 + tpPct / 100)).toFixed(4))
-      : Number((price * (1 - tpPct / 100)).toFixed(4));
-  const target2 =
-    action === 'BUY'
-      ? Number((price * (1 + (tpPct * 1.6) / 100)).toFixed(4))
-      : Number((price * (1 - (tpPct * 1.6) / 100)).toFixed(4));
+  const levels = computeThreeTpLevels(
+    action === 'SELL' ? 'SELL' : 'BUY',
+    price,
+    slPct,
+    tpPct
+  );
+  const stopLoss = Number(levels.stopLoss.toFixed(4));
+  const target1 = Number(levels.tp1.toFixed(4));
+  const target2 = Number(levels.tp2.toFixed(4));
+  const target3 = Number(levels.tp3.toFixed(4));
 
   const snapshot: Record<string, number | string> = {
     close: Number(price.toFixed(4)),
@@ -1012,6 +1416,9 @@ export async function evaluatePineStrategyLive(params: {
   }
   if (Number.isFinite(ctx.series.rsi14?.[lastIdx])) {
     snapshot.RSI = Number(ctx.series.rsi14[lastIdx].toFixed(2));
+  }
+  if (Number.isFinite(ctx.series.adx14?.[lastIdx])) {
+    snapshot.ADX = Number(ctx.series.adx14[lastIdx].toFixed(2));
   }
 
   return {
@@ -1027,6 +1434,7 @@ export async function evaluatePineStrategyLive(params: {
     stopLoss,
     target1,
     target2,
+    target3,
     reason:
       action === 'BUY'
         ? `Pine LONG entry triggered (${ctx.summary.buyRuleSummary})`

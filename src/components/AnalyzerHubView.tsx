@@ -22,6 +22,7 @@ import type {
   StrategyConfig,
   TelegramLogRecord,
   TradeJournalEntry,
+  TradeTrailState,
 } from '../types/trading';
 import type { AutoScanMarketItem } from './DashboardView';
 import { WatchlistView } from './WatchlistView';
@@ -43,6 +44,8 @@ interface AnalyzerHubViewProps {
   onSubTabChange: (tab: AnalyzerSubTab) => void;
   selectedInstrumentId: string;
   onSelectInstrumentForTerminal: (id: string) => void;
+  activeAccountType: 'LIVE' | 'DEMO';
+  tradeProtectionMap: Record<string, TradeTrailState>;
   config: StrategyConfig;
   trades: TradeJournalEntry[];
   signals: StoredTradeSignal[];
@@ -121,6 +124,8 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
   onSubTabChange,
   selectedInstrumentId,
   onSelectInstrumentForTerminal,
+  activeAccountType,
+  tradeProtectionMap,
   config,
   trades,
   signals,
@@ -169,17 +174,22 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Analyzer Header + Clean Sub-Tab Navigation */}
-      <div className="bg-[#11141A] border border-white/[0.08] rounded-xl p-4 space-y-3">
+      <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4 space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold text-white">Market Analyzer &amp; AI Tools</h2>
-            <p className="text-xs text-slate-400">
-              Trade Auto-Analyzer (manual trigger by default), 32-Market Screener, Chart AI, Assistant, Pine Bots &amp; Signal Routing
+            <h2 className="text-lg font-semibold text-slate-900 dark:text-white">Market Analyzer &amp; Auto-Trade Desk</h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              {activeAccountType === 'LIVE' ? 'Actual Live Account' : 'Demo Paper Account'} · 3-TP Stepped SL Trailing (TP1 → SL @ Entry · TP2 → SL @ TP1 · TP3 Full Target)
             </p>
           </div>
-          <div className="text-[11px] font-mono-tabular text-slate-400">
+          <div className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400">
+            Scope:{' '}
+            <span className={activeAccountType === 'LIVE' ? 'text-blue-700 dark:text-sky-400 font-semibold' : 'text-emerald-700 dark:text-emerald-400 font-semibold'}>
+              {activeAccountType === 'LIVE' ? 'LIVE' : 'DEMO'}
+            </span>
+            {' · '}
             Auto-Scan:{' '}
-            <span className={autoScanEnabled ? 'text-emerald-400 font-semibold' : 'text-slate-300'}>
+            <span className={autoScanEnabled ? 'text-emerald-700 dark:text-emerald-400 font-semibold' : 'text-slate-700 dark:text-slate-300'}>
               {autoScanEnabled ? 'ON (20s)' : 'OFF'}
             </span>
             {' · '}
@@ -187,8 +197,8 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
             <span
               className={
                 autoExecuteEnabled && !config.killSwitchActive
-                  ? 'text-amber-300 font-semibold'
-                  : 'text-slate-300'
+                  ? 'text-amber-700 dark:text-amber-300 font-semibold'
+                  : 'text-slate-700 dark:text-slate-300'
               }
             >
               {autoExecuteEnabled && !config.killSwitchActive ? 'ON' : 'OFF'}
@@ -196,7 +206,7 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-white/[0.06]">
+        <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200 dark:border-slate-800">
           {SUB_TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeSubTab === tab.id;
@@ -207,8 +217,8 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                 onClick={() => onSubTabChange(tab.id)}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                   active
-                    ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-white'
+                    ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -221,15 +231,15 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
 
       {/* Sub-Tab 1: Trade Auto-Analyzer (Moved off Dashboard, stays OFF until user activates) */}
       {activeSubTab === 'auto-analyzer' && (
-        <div className="bg-[#11141A] border border-white/[0.08] rounded-xl overflow-hidden">
-          <div className="px-4 py-3.5 border-b border-white/[0.08] flex flex-wrap items-center justify-between gap-3">
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden">
+          <div className="px-4 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <Bot className="w-4 h-4 text-emerald-400 shrink-0" />
+              <Bot className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
               <div>
-                <h3 className="text-sm font-semibold text-white">
+                <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                   Trade Auto-Analyzer (XAUUSD · NIFTY 50 · XAGUSD · BTCUSDT · Crude Oil MCX)
                 </h3>
-                <p className="text-[11px] text-slate-400">
+                <p className="text-[11px] text-slate-500 dark:text-slate-400">
                   Off by default — runs only when you click Scan Now or manually enable Auto-Scan
                   {lastAutoScanAt
                     ? ` · Last scan ${new Date(lastAutoScanAt).toLocaleTimeString()}`
@@ -244,8 +254,8 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                 onClick={onToggleAutoScan}
                 className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                   autoScanEnabled
-                    ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 Auto-Scan (20s): {autoScanEnabled ? 'ON' : 'OFF'}
@@ -257,8 +267,8 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                 disabled={config.killSwitchActive}
                 className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 disabled:opacity-50 ${
                   autoExecuteEnabled && !config.killSwitchActive
-                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
-                    : 'bg-[#090B0E] border-white/[0.08] text-slate-400 hover:text-slate-200'
+                    ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/35 text-amber-700 dark:text-amber-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}
               >
                 <Zap className="w-3.5 h-3.5" />
@@ -278,14 +288,14 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
           </div>
 
           {config.killSwitchActive && (
-            <div className="px-4 py-2 bg-red-500/10 border-b border-red-500/20 flex items-center gap-2 text-xs text-red-300">
+            <div className="px-4 py-2 bg-rose-50 dark:bg-rose-500/10 border-b border-rose-200 dark:border-rose-500/35 flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
               <ShieldAlert className="w-4 h-4 shrink-0" />
               Emergency Kill Switch is ACTIVE — automated execution is paused until switched off in Admin Settings.
             </div>
           )}
 
           {autoPilotNote && (
-            <div className="px-4 py-2 bg-emerald-500/10 border-b border-emerald-500/20 text-xs text-emerald-200">
+            <div className="px-4 py-2 bg-emerald-50 dark:bg-emerald-500/10 border-b border-emerald-200 dark:border-emerald-500/35 text-xs text-emerald-800 dark:text-emerald-200">
               {autoPilotNote}
             </div>
           )}
@@ -293,20 +303,21 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse text-xs">
               <thead>
-                <tr className="border-b border-white/[0.06] text-[11px] text-slate-400">
+                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                   <th className="py-2.5 px-4 font-medium">Market (Open Terminal)</th>
                   <th className="py-2.5 px-4 font-medium text-right">Live Price</th>
                   <th className="py-2.5 px-4 font-medium">15m / 5m Bias</th>
                   <th className="py-2.5 px-4 font-medium">Setup / Contract</th>
-                  <th className="py-2.5 px-4 font-medium text-right">Entry / SL / T1</th>
+                  <th className="py-2.5 px-4 font-medium text-right">Entry / Initial SL</th>
+                  <th className="py-2.5 px-4 font-medium text-right">3-TP Stepped Ladder</th>
                   <th className="py-2.5 px-4 font-medium text-right">Score · R:R</th>
                   <th className="py-2.5 px-4 font-medium text-right">Execution</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-white/[0.06]">
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
                 {autoScanResults.length === 0 ? (
                   <tr>
-                    <td colSpan={7} className="py-8 px-4 text-center text-slate-400">
+                    <td colSpan={8} className="py-8 px-4 text-center text-slate-500 dark:text-slate-400">
                       {autoScanLoading
                         ? 'Scanning XAUUSD, NIFTY 50, XAGUSD, BTCUSDT, and MCX Crude Oil...'
                         : 'Auto-Analyzer is currently OFF. Click "Scan & Analyze Now" for a single scan or toggle Auto-Scan ON.'}
@@ -325,17 +336,17 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                     const chgPos = (row.changePercent ?? 0) >= 0;
 
                     return (
-                      <tr key={row.instrument.id} className="hover:bg-white/[0.03]">
+                      <tr key={row.instrument.id} className="hover:bg-slate-100 dark:hover:bg-white/[0.06]">
                         <td className="py-2.5 px-4">
                           <button
                             type="button"
                             onClick={() => onSelectInstrumentForTerminal(row.instrument.id)}
                             className="text-left group"
                           >
-                            <div className="font-semibold text-white group-hover:text-emerald-300 transition-colors">
+                            <div className="font-semibold text-slate-900 dark:text-white group-hover:text-emerald-700 dark:group-hover:text-emerald-300 transition-colors">
                               {row.instrument.symbol}
                             </div>
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400">
                               {row.instrument.exchangeLabel} · Open Terminal →
                             </div>
                           </button>
@@ -343,13 +354,13 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                         <td className="py-2.5 px-4 text-right font-mono-tabular">
                           {row.quoteAvailable && row.price !== null ? (
                             <div>
-                              <div className="font-semibold text-white">
+                              <div className="font-semibold text-slate-900 dark:text-white">
                                 {c}
                                 {row.price.toLocaleString()}
                               </div>
                               <div
                                 className={`text-[11px] ${
-                                  chgPos ? 'text-emerald-400' : 'text-red-400'
+                                  chgPos ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'
                                 }`}
                               >
                                 {chgPos ? '+' : ''}
@@ -357,14 +368,14 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                               </div>
                             </div>
                           ) : (
-                            <span className="text-amber-400">DATA UNAVAILABLE</span>
+                            <span className="text-amber-700 dark:text-amber-400">DATA UNAVAILABLE</span>
                           )}
                         </td>
                         <td className="py-2.5 px-4">
-                          <div className="font-medium text-slate-200">
+                          <div className="font-medium text-slate-800 dark:text-slate-200">
                             {row.trend15m} / {row.trend5m}
                           </div>
-                          <div className="text-[11px] text-slate-400 font-mono-tabular">
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono-tabular">
                             RSI {row.rsi5m ?? '—'} · EMA9 {row.ema9 ?? '—'}
                           </div>
                         </td>
@@ -374,45 +385,83 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
                               <span
                                 className={`font-semibold ${
                                   sig.direction === 'BUY'
-                                    ? 'text-emerald-400'
+                                    ? 'text-emerald-700 dark:text-emerald-400'
                                     : sig.direction === 'SELL'
-                                      ? 'text-red-400'
-                                      : 'text-amber-300'
+                                      ? 'text-rose-700 dark:text-rose-400'
+                                      : 'text-amber-700 dark:text-amber-300'
                                 }`}
                               >
                                 {sig.direction === 'NO_TRADE' ? 'WAIT / NO TRADE' : sig.direction}
                               </span>
                               <span className="text-slate-500"> · </span>
-                              <span className="text-slate-300">{sig.contract}</span>
+                              <span className="text-slate-700 dark:text-slate-300">{sig.contract}</span>
                             </div>
                           ) : (
                             <span className="text-slate-500">Unavailable</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-4 text-right font-mono-tabular text-slate-300">
-                          {canExecute
-                            ? `${c}${sig!.entryPrice} / ${sig!.stopLoss} / ${sig!.target1}`
-                            : 'Zone Wait'}
+                        <td className="py-2.5 px-4 text-right font-mono-tabular text-slate-700 dark:text-slate-300">
+                          {canExecute ? (
+                            <div>
+                              <div className="text-slate-900 dark:text-white font-medium">
+                                {c}
+                                {sig!.entryPrice}
+                              </div>
+                              <div className="text-[11px] text-rose-700 dark:text-rose-400">SL {sig!.stopLoss}</div>
+                            </div>
+                          ) : (
+                            'Zone Wait'
+                          )}
                         </td>
                         <td className="py-2.5 px-4 text-right font-mono-tabular">
-                          <div className="font-semibold text-white">
+                          {canExecute ? (
+                            <div className="space-y-0.5 text-[11px]">
+                              <div className="text-emerald-700 dark:text-emerald-300">
+                                TP1 {sig!.target1} · TP2 {sig!.target2}
+                              </div>
+                              <div className="text-blue-700 dark:text-sky-400">
+                                TP3 {sig!.target3 ?? sig!.target2} · Trail SL
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-slate-500">—</span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono-tabular">
+                          <div className="font-semibold text-slate-900 dark:text-white">
                             {sig ? `${sig.qualityScore}/100` : '—'}
                           </div>
-                          <div className="text-[11px] text-slate-400">
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
                             {sig?.riskReward || '—'} · {sig?.status || '—'}
                           </div>
                         </td>
                         <td className="py-2.5 px-4 text-right">
-                          {alreadyOpen ? (
-                            <span className="text-[11px] font-semibold text-sky-300 whitespace-nowrap">
-                              OPEN RUNNING
-                            </span>
-                          ) : canExecute ? (
+                          {alreadyOpen ? (() => {
+                            const matchingOpen = trades.find(
+                              (t) =>
+                                t.status === 'OPEN' &&
+                                (normalizeKey(t.instrument) === normalizeKey(row.instrument.id) ||
+                                  normalizeKey(t.instrument) === normalizeKey(row.instrument.symbol))
+                            );
+                            const trail = matchingOpen ? tradeProtectionMap[matchingOpen.id] : undefined;
+                            return (
+                              <div className="text-right">
+                                <div className="text-[11px] font-semibold text-blue-700 dark:text-sky-300 whitespace-nowrap">
+                                  OPEN {trail ? `· TP${trail.tpStage}/3` : ''}
+                                </div>
+                                {trail && (
+                                  <div className="text-[10px] font-mono-tabular text-emerald-700 dark:text-emerald-400">
+                                    SL {trail.currentSl.toFixed(2)}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })() : canExecute ? (
                             <button
                               type="button"
                               disabled={isExecuting || config.killSwitchActive}
                               onClick={() => onExecuteSignalInstant(sig!)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 rounded-md whitespace-nowrap disabled:opacity-50"
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-semibold bg-emerald-50 dark:bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-200 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300 rounded-md whitespace-nowrap disabled:opacity-50"
                             >
                               <Play className="w-3 h-3" />
                               {isExecuting ? 'Placing...' : 'Execute Trade'}

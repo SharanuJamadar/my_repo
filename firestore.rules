@@ -78,7 +78,10 @@ service cloud.firestore {
           'minSetupScore', 'minRiskReward', 'maxRiskPerTradePct',
           'prioritizeAtmOptions', 'comexCrudeEma9Priority', 'paperTradingOnly',
           'autoBroadcastTelegram', 'telegramChannelLabel', 'dataProviderLabel',
-          'brokerProviderLabel', 'killSwitchActive', 'activeInstruments', 'updatedAt'
+          'brokerProviderLabel', 'killSwitchActive', 'activeInstruments',
+          'adxMinThreshold', 'enableSessionFilter', 'pauseOnHighImpactNews',
+          'enablePartialProfitBooking', 'dailyMaxLossPct', 'dailyProfitTargetPct',
+          'updatedAt'
         ])
         && isValidId(data.userId)
         && data.userId == userId
@@ -102,6 +105,12 @@ service cloud.firestore {
         && (!('brokerProviderLabel' in data) || isValidString(data.brokerProviderLabel, 0, 80))
         && data.killSwitchActive is bool
         && isValidBoundedStringList(data.activeInstruments, 50)
+        && (!('adxMinThreshold' in data) || (data.adxMinThreshold is number && data.adxMinThreshold >= 10 && data.adxMinThreshold <= 50))
+        && (!('enableSessionFilter' in data) || data.enableSessionFilter is bool)
+        && (!('pauseOnHighImpactNews' in data) || data.pauseOnHighImpactNews is bool)
+        && (!('enablePartialProfitBooking' in data) || data.enablePartialProfitBooking is bool)
+        && (!('dailyMaxLossPct' in data) || (data.dailyMaxLossPct is number && data.dailyMaxLossPct >= 0.5 && data.dailyMaxLossPct <= 25))
+        && (!('dailyProfitTargetPct' in data) || (data.dailyProfitTargetPct is number && data.dailyProfitTargetPct >= 1 && data.dailyProfitTargetPct <= 50))
         && data.updatedAt is timestamp;
     }
 
@@ -157,9 +166,9 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'signalId', 'instrument', 'contract', 'direction', 'executionMode',
-          'entryPrice', 'stopLoss', 'target1', 'target2', 'target3', 'exitPrice',
-          'quantity', 'status', 'result', 'pnl', 'riskReward',
-          'strategyConfirmation', 'screenshotNote', 'brokerOrderId', 'createdAt', 'updatedAt'
+          'entryPrice', 'stopLoss', 'target1', 'target2', 'target3', 'tpStage', 'exitPrice',
+          'quantity', 'remainingQuantity', 'partialRealizedPnl', 'status', 'result', 'pnl', 'riskReward',
+          'strategyConfirmation', 'screenshotNote', 'brokerOrderId', 'auditTrail', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.userId)
         && (!('signalId' in data) || isValidString(data.signalId, 0, 128))
@@ -172,8 +181,11 @@ service cloud.firestore {
         && data.target1 is number && data.target1 >= 0
         && (!('target2' in data) || (data.target2 is number && data.target2 >= 0))
         && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
+        && (!('tpStage' in data) || (data.tpStage is int && data.tpStage >= 0 && data.tpStage <= 2))
         && (!('exitPrice' in data) || (data.exitPrice is number && data.exitPrice >= 0))
         && data.quantity is number && data.quantity > 0
+        && (!('remainingQuantity' in data) || (data.remainingQuantity is number && data.remainingQuantity >= 0))
+        && (!('partialRealizedPnl' in data) || data.partialRealizedPnl is number)
         && data.status in ['OPEN', 'CLOSED']
         && data.result in ['WIN', 'LOSS', 'BREAKEVEN', 'OPEN']
         && data.pnl is number
@@ -181,6 +193,7 @@ service cloud.firestore {
         && isValidString(data.strategyConfirmation, 1, 500)
         && (!('screenshotNote' in data) || isValidString(data.screenshotNote, 0, 300))
         && (!('brokerOrderId' in data) || isValidString(data.brokerOrderId, 0, 80))
+        && (!('auditTrail' in data) || isValidBoundedStringList(data.auditTrail, 20))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
@@ -216,7 +229,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'signalId', 'instrument', 'contract', 'expiry', 'quantity',
-          'orderType', 'side', 'entryPrice', 'stopLoss', 'targetPrice',
+          'orderType', 'side', 'entryPrice', 'stopLoss', 'targetPrice', 'target2', 'target3',
           'executionMode', 'brokerName', 'brokerOrderId', 'status', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.userId)
@@ -230,6 +243,8 @@ service cloud.firestore {
         && data.entryPrice is number && data.entryPrice > 0
         && data.stopLoss is number && data.stopLoss >= 0
         && data.targetPrice is number && data.targetPrice >= 0
+        && (!('target2' in data) || (data.target2 is number && data.target2 >= 0))
+        && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
         && data.executionMode in ['PAPER', 'LIVE']
         && isValidString(data.brokerName, 1, 60)
         && (!('brokerOrderId' in data) || isValidString(data.brokerOrderId, 0, 80))
@@ -284,6 +299,7 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'userId', 'name', 'description', 'instrumentId', 'timeframe', 'pineCode',
           'quantity', 'initialCapital', 'stopLossPct', 'takeProfitPct',
+          'riskPerTradePct', 'trailingStop',
           'executionMode', 'botEnabled', 'autoExecute', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.userId)
@@ -296,6 +312,8 @@ service cloud.firestore {
         && data.initialCapital is number && data.initialCapital >= 100
         && data.stopLossPct is number && data.stopLossPct > 0 && data.stopLossPct <= 50
         && data.takeProfitPct is number && data.takeProfitPct > 0 && data.takeProfitPct <= 200
+        && (!('riskPerTradePct' in data) || (data.riskPerTradePct is number && data.riskPerTradePct >= 0 && data.riskPerTradePct <= 10))
+        && (!('trailingStop' in data) || data.trailingStop is bool)
         && data.executionMode in ['PAPER', 'LIVE']
         && data.botEnabled is bool
         && data.autoExecute is bool
@@ -357,7 +375,9 @@ service cloud.firestore {
               'maxRiskPerTradePct', 'prioritizeAtmOptions', 'comexCrudeEma9Priority',
               'paperTradingOnly', 'autoBroadcastTelegram', 'telegramChannelLabel',
               'dataProviderLabel', 'brokerProviderLabel', 'killSwitchActive',
-              'activeInstruments', 'updatedAt'
+              'activeInstruments', 'adxMinThreshold', 'enableSessionFilter',
+              'pauseOnHighImpactNews', 'enablePartialProfitBooking', 'dailyMaxLossPct',
+              'dailyProfitTargetPct', 'updatedAt'
             ])
           )
         );
@@ -414,9 +434,14 @@ service cloud.firestore {
           || (
             existing().userId == request.auth.uid
             && existing().status == 'OPEN'
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'exitPrice', 'status', 'result', 'pnl', 'screenshotNote', 'updatedAt'
-            ])
+            && (
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'exitPrice', 'status', 'result', 'pnl', 'remainingQuantity', 'partialRealizedPnl', 'screenshotNote', 'auditTrail', 'updatedAt'
+              ])
+              || incoming().diff(existing()).affectedKeys().hasOnly([
+                'stopLoss', 'tpStage', 'remainingQuantity', 'partialRealizedPnl', 'auditTrail', 'updatedAt'
+              ])
+            )
           )
         );
       allow delete: if isValidId(tradeId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
@@ -542,6 +567,7 @@ service cloud.firestore {
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'name', 'description', 'instrumentId', 'timeframe', 'pineCode',
               'quantity', 'initialCapital', 'stopLossPct', 'takeProfitPct',
+              'riskPerTradePct', 'trailingStop',
               'executionMode', 'botEnabled', 'autoExecute', 'updatedAt'
             ])
           )

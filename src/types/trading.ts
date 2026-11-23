@@ -47,6 +47,9 @@ export interface TechnicalSnapshot {
     histogram: number;
   } | null;
   atr: number | null;
+  adx?: number | null;
+  bollingerSqueeze?: boolean;
+  regime?: 'TRENDING' | 'CHOPPY' | 'SQUEEZE';
   volumeRatio: number | null;
   candlePattern: string;
   trendBias: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
@@ -74,6 +77,10 @@ export interface MarketQuoteResponse {
   marketTimestamp: string; // ISO timestamp of latest candle/tick
   timeframe: Timeframe;
   price?: number;
+  bid?: number;
+  ask?: number;
+  spread?: number;
+  spreadBps?: number;
   open?: number;
   high?: number;
   low?: number;
@@ -114,6 +121,12 @@ export interface StrategyConfig {
   brokerProviderLabel: string;
   killSwitchActive: boolean;
   activeInstruments: string[];
+  adxMinThreshold?: number;
+  enableSessionFilter?: boolean;
+  pauseOnHighImpactNews?: boolean;
+  enablePartialProfitBooking?: boolean;
+  dailyMaxLossPct?: number;
+  dailyProfitTargetPct?: number;
   updatedAt?: unknown;
 }
 
@@ -198,8 +211,11 @@ export interface TradeJournalEntry {
   target1: number;
   target2?: number;
   target3?: number;
+  tpStage?: 0 | 1 | 2;
   exitPrice?: number;
   quantity: number;
+  remainingQuantity?: number;
+  partialRealizedPnl?: number;
   status: 'OPEN' | 'CLOSED';
   result: 'WIN' | 'LOSS' | 'BREAKEVEN' | 'OPEN';
   pnl: number;
@@ -207,8 +223,17 @@ export interface TradeJournalEntry {
   strategyConfirmation: string;
   screenshotNote?: string;
   brokerOrderId?: string;
+  auditTrail?: string[];
   createdAt: any;
   updatedAt: any;
+}
+
+export interface TradeTrailState {
+  currentSl: number;
+  tpStage: 0 | 1 | 2;
+  target1: number;
+  target2: number;
+  target3: number;
 }
 
 export interface ChatMessageRecord {
@@ -245,6 +270,8 @@ export interface ExecutionOrderRecord {
   entryPrice: number;
   stopLoss: number;
   targetPrice: number;
+  target2?: number;
+  target3?: number;
   executionMode: TradeMode;
   brokerName: string;
   brokerOrderId?: string;
@@ -778,13 +805,13 @@ export const DEFAULT_STRATEGY_CONFIG: Omit<StrategyConfig, 'userId'> = {
   emaMid: 20,
   emaSlow: 50,
   rsiPeriod: 14,
-  rsiBullishMin: 55,
-  rsiBearishMax: 45,
+  rsiBullishMin: 53,
+  rsiBearishMax: 47,
   trendTimeframe: '15m',
   entryTimeframe: '5m',
-  minSetupScore: 70,
-  minRiskReward: 1.8,
-  maxRiskPerTradePct: 1.5,
+  minSetupScore: 75,
+  minRiskReward: 2.0,
+  maxRiskPerTradePct: 2.0,
   prioritizeAtmOptions: true,
   comexCrudeEma9Priority: true,
   paperTradingOnly: true,
@@ -794,6 +821,12 @@ export const DEFAULT_STRATEGY_CONFIG: Omit<StrategyConfig, 'userId'> = {
   brokerProviderLabel: 'My Trade Paper Trading Engine',
   killSwitchActive: false,
   activeInstruments: INSTRUMENTS.map((i) => i.id),
+  adxMinThreshold: 18,
+  enableSessionFilter: true,
+  pauseOnHighImpactNews: true,
+  enablePartialProfitBooking: true,
+  dailyMaxLossPct: 3.0,
+  dailyProfitTargetPct: 10.0,
 };
 
 export interface AccountProfileSettings {
@@ -836,6 +869,8 @@ export interface PineStrategyRecord {
   initialCapital: number;
   stopLossPct: number;
   takeProfitPct: number;
+  riskPerTradePct?: number;
+  trailingStop?: boolean;
   executionMode: TradeMode;
   botEnabled: boolean;
   autoExecute: boolean;
@@ -852,8 +887,22 @@ export interface PineBacktestTrade {
   exitPrice: number;
   quantity: number;
   pnl: number;
+  costs?: number;
   returnPct: number;
-  exitReason: 'TAKE_PROFIT' | 'STOP_LOSS' | 'SIGNAL_REVERSE' | 'END_OF_SERIES';
+  tp1Price?: number;
+  tp2Price?: number;
+  tp3Price?: number;
+  tpReached?: 0 | 1 | 2 | 3;
+  trailedStopLoss?: number;
+  exitReason:
+    | 'TP3_TARGET'
+    | 'TRAIL_SL_TP2'
+    | 'TRAIL_SL_TP1'
+    | 'TAKE_PROFIT'
+    | 'TRAILING_PROFIT'
+    | 'STOP_LOSS'
+    | 'SIGNAL_REVERSE'
+    | 'END_OF_SERIES';
   note: string;
 }
 
@@ -899,6 +948,8 @@ export interface PineBacktestResult {
     maxDrawdownPct: number;
     avgWin: number;
     avgLoss: number;
+    totalCosts?: number;
+    spreadBpsModeled?: number;
   };
 }
 
@@ -916,6 +967,7 @@ export interface PineBotEvaluationResult {
   stopLoss: number;
   target1: number;
   target2: number;
+  target3: number;
   reason: string;
   indicatorSnapshot: Record<string, number | string>;
   parsed: PineParsedSummary;
@@ -961,3 +1013,90 @@ export interface LiveMarketNewsResponse {
   groundingSources: GroundingSource[];
   cached?: boolean;
 }
+
+export interface PriceAlertRule {
+  id: string;
+  instrumentId: string;
+  symbol: string;
+  condition: 'ABOVE' | 'BELOW';
+  targetPrice: number;
+  note?: string;
+  sendTelegram: boolean;
+  active: boolean;
+  triggeredAt?: string;
+  triggeredPrice?: number;
+  createdAt: string;
+}
+
+export interface MarketSessionClock {
+  id: 'NSE' | 'TOKYO' | 'LONDON' | 'NEW_YORK';
+  name: string;
+  city: string;
+  timezone: string;
+  localTime: string;
+  isOpen: boolean;
+  statusDetail: string;
+  markets: string;
+}
+
+export interface EconomicCalendarEvent {
+  id: string;
+  title: string;
+  country: string;
+  currency: string;
+  impact: 'HIGH' | 'MEDIUM' | 'LOW';
+  scheduledAt: string; // ISO
+  forecast?: string;
+  previous?: string;
+  minutesUntil: number;
+  isImminent: boolean;
+  affectsSegments: MarketSegment[];
+}
+
+export interface EconomicCalendarResponse {
+  fetchedAt: string;
+  source: string;
+  sessions: MarketSessionClock[];
+  events: EconomicCalendarEvent[];
+  highImpactBlackout: {
+    active: boolean;
+    eventTitle?: string;
+    minutesUntil?: number;
+    windowMinutes: number;
+  };
+}
+
+export interface MonitoredPositionSyncItem {
+  tradeId: string;
+  instrumentId: string;
+  symbol: string;
+  contract: string;
+  direction: 'BUY' | 'SELL';
+  executionMode: TradeMode;
+  entryPrice: number;
+  stopLoss: number;
+  target1: number;
+  target2: number;
+  target3: number;
+  tpStage: 0 | 1 | 2;
+  quantity: number;
+  remainingQuantity: number;
+  partialRealizedPnl: number;
+  enablePartialProfitBooking: boolean;
+  brokerOrderId?: string;
+}
+
+export interface MonitoredPositionEvent {
+  tradeId: string;
+  type: 'TRAIL_TP1' | 'TRAIL_TP2' | 'CLOSE_TP3' | 'CLOSE_SL';
+  timestamp: string;
+  price: number;
+  newStopLoss: number;
+  tpStage: 0 | 1 | 2;
+  partialRealizedPnl: number;
+  remainingQuantity: number;
+  finalPnl?: number;
+  result?: 'WIN' | 'LOSS' | 'BREAKEVEN';
+  detail: string;
+}
+

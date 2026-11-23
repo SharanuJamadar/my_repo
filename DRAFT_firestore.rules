@@ -101,7 +101,7 @@ service cloud.firestore {
         && (!('dataProviderLabel' in data) || isValidString(data.dataProviderLabel, 0, 80))
         && (!('brokerProviderLabel' in data) || isValidString(data.brokerProviderLabel, 0, 80))
         && data.killSwitchActive is bool
-        && isValidBoundedStringList(data.activeInstruments, 20)
+        && isValidBoundedStringList(data.activeInstruments, 50)
         && data.updatedAt is timestamp;
     }
 
@@ -157,7 +157,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'signalId', 'instrument', 'contract', 'direction', 'executionMode',
-          'entryPrice', 'stopLoss', 'target1', 'target2', 'target3', 'exitPrice',
+          'entryPrice', 'stopLoss', 'target1', 'target2', 'target3', 'tpStage', 'exitPrice',
           'quantity', 'status', 'result', 'pnl', 'riskReward',
           'strategyConfirmation', 'screenshotNote', 'brokerOrderId', 'createdAt', 'updatedAt'
         ])
@@ -172,6 +172,7 @@ service cloud.firestore {
         && data.target1 is number && data.target1 >= 0
         && (!('target2' in data) || (data.target2 is number && data.target2 >= 0))
         && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
+        && (!('tpStage' in data) || (data.tpStage is int && data.tpStage >= 0 && data.tpStage <= 2))
         && (!('exitPrice' in data) || (data.exitPrice is number && data.exitPrice >= 0))
         && data.quantity is number && data.quantity > 0
         && data.status in ['OPEN', 'CLOSED']
@@ -216,7 +217,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'userId', 'signalId', 'instrument', 'contract', 'expiry', 'quantity',
-          'orderType', 'side', 'entryPrice', 'stopLoss', 'targetPrice',
+          'orderType', 'side', 'entryPrice', 'stopLoss', 'targetPrice', 'target2', 'target3',
           'executionMode', 'brokerName', 'brokerOrderId', 'status', 'createdAt', 'updatedAt'
         ])
         && isValidId(data.userId)
@@ -230,6 +231,8 @@ service cloud.firestore {
         && data.entryPrice is number && data.entryPrice > 0
         && data.stopLoss is number && data.stopLoss >= 0
         && data.targetPrice is number && data.targetPrice >= 0
+        && (!('target2' in data) || (data.target2 is number && data.target2 >= 0))
+        && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
         && data.executionMode in ['PAPER', 'LIVE']
         && isValidString(data.brokerName, 1, 60)
         && (!('brokerOrderId' in data) || isValidString(data.brokerOrderId, 0, 80))
@@ -246,6 +249,63 @@ service cloud.firestore {
         && data.balance is number && data.balance >= 0
         && data.totalAdded is number && data.totalAdded >= 0
         && isValidBoundedStringList(data.recentDeposits, 20)
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidAccountSettings(data, userId) {
+      return data.keys().hasAll([
+          'userId', 'displayName', 'riskProfile', 'defaultInstrumentId',
+          'defaultTimeframe', 'dailyLossLimit', 'tradeAlertsEnabled', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'displayName', 'email', 'mobileNumber', 'accountMode', 'onboardingCompleted',
+          'riskProfile', 'defaultInstrumentId', 'defaultTimeframe', 'dailyLossLimit',
+          'telegramChatId', 'tradeAlertsEnabled', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && data.userId == userId
+        && isValidString(data.displayName, 1, 100)
+        && (!('email' in data) || isValidString(data.email, 0, 200))
+        && (!('mobileNumber' in data) || isValidString(data.mobileNumber, 0, 24))
+        && (!('accountMode' in data) || data.accountMode in ['UNDECIDED', 'BROKER', 'DEMO'])
+        && (!('onboardingCompleted' in data) || data.onboardingCompleted is bool)
+        && data.riskProfile in ['CONSERVATIVE', 'BALANCED', 'AGGRESSIVE']
+        && isValidString(data.defaultInstrumentId, 1, 40)
+        && data.defaultTimeframe in ['5m', '15m', '1h', '4h', '1d']
+        && data.dailyLossLimit is number && data.dailyLossLimit >= 0
+        && (!('telegramChatId' in data) || isValidString(data.telegramChatId, 0, 64))
+        && data.tradeAlertsEnabled is bool
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidPineStrategy(data) {
+      return data.keys().hasAll([
+          'userId', 'name', 'instrumentId', 'timeframe', 'pineCode',
+          'quantity', 'initialCapital', 'stopLossPct', 'takeProfitPct',
+          'executionMode', 'botEnabled', 'autoExecute', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'userId', 'name', 'description', 'instrumentId', 'timeframe', 'pineCode',
+          'quantity', 'initialCapital', 'stopLossPct', 'takeProfitPct',
+          'riskPerTradePct', 'trailingStop',
+          'executionMode', 'botEnabled', 'autoExecute', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.userId)
+        && isValidString(data.name, 1, 120)
+        && (!('description' in data) || isValidString(data.description, 0, 400))
+        && isValidString(data.instrumentId, 1, 40)
+        && data.timeframe in ['5m', '15m', '1h', '4h', '1d']
+        && isValidString(data.pineCode, 5, 30000)
+        && data.quantity is number && data.quantity > 0
+        && data.initialCapital is number && data.initialCapital >= 100
+        && data.stopLossPct is number && data.stopLossPct > 0 && data.stopLossPct <= 50
+        && data.takeProfitPct is number && data.takeProfitPct > 0 && data.takeProfitPct <= 200
+        && (!('riskPerTradePct' in data) || (data.riskPerTradePct is number && data.riskPerTradePct >= 0 && data.riskPerTradePct <= 10))
+        && (!('trailingStop' in data) || data.trailingStop is bool)
+        && data.executionMode in ['PAPER', 'LIVE']
+        && data.botEnabled is bool
+        && data.autoExecute is bool
+        && data.createdAt is timestamp
         && data.updatedAt is timestamp;
     }
 
@@ -360,9 +420,14 @@ service cloud.firestore {
           || (
             existing().userId == request.auth.uid
             && existing().status == 'OPEN'
-            && incoming().diff(existing()).affectedKeys().hasOnly([
-              'exitPrice', 'status', 'result', 'pnl', 'screenshotNote', 'updatedAt'
-            ])
+            && (
+              incoming().diff(existing()).affectedKeys().hasOnly([
+                'exitPrice', 'status', 'result', 'pnl', 'screenshotNote', 'updatedAt'
+              ])
+              || incoming().diff(existing()).affectedKeys().hasOnly([
+                'stopLoss', 'tpStage', 'updatedAt'
+              ])
+            )
           )
         );
       allow delete: if isValidId(tradeId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
@@ -439,6 +504,61 @@ service cloud.firestore {
           )
         );
       allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /accountSettings/{userId} {
+      allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(userId)
+        && isOwner(userId)
+        && isValidAccountSettings(incoming(), userId)
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(userId)
+        && isValidAccountSettings(incoming(), userId)
+        && incoming().userId == existing().userId
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            isOwner(userId)
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'displayName', 'email', 'mobileNumber', 'accountMode', 'onboardingCompleted',
+              'riskProfile', 'defaultInstrumentId', 'defaultTimeframe', 'dailyLossLimit',
+              'telegramChatId', 'tradeAlertsEnabled', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(userId) && isAdmin();
+    }
+
+    match /pineStrategies/{strategyId} {
+      allow get: if isValidId(strategyId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isValidId(strategyId)
+        && isVerifiedUser()
+        && isValidPineStrategy(incoming())
+        && incoming().userId == request.auth.uid
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isValidId(strategyId)
+        && isVerifiedUser()
+        && isValidPineStrategy(incoming())
+        && incoming().userId == existing().userId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          isAdmin()
+          || (
+            existing().userId == request.auth.uid
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'name', 'description', 'instrumentId', 'timeframe', 'pineCode',
+              'quantity', 'initialCapital', 'stopLossPct', 'takeProfitPct',
+              'riskPerTradePct', 'trailingStop',
+              'executionMode', 'botEnabled', 'autoExecute', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if isValidId(strategyId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
     }
   }
 }

@@ -8,6 +8,7 @@ import type {
   SupportResistanceLevels,
   TechnicalSnapshot,
 } from '../src/types/trading.ts';
+import { isLiquiditySessionActive } from './economicCalendarService.ts';
 
 export function calculateEMASeries(values: number[], period: number): number[] {
   if (values.length === 0 || period <= 0) return [];
@@ -95,6 +96,73 @@ export function calculateATR(candles: CandleBar[], period = 14): number | null {
   return Number((sum / recent.length).toFixed(4));
 }
 
+export function calculateADX(candles: CandleBar[], period = 14): number | null {
+  if (candles.length <= period * 2) return null;
+  const n = Math.max(2, Math.round(period));
+  const tr: number[] = new Array<number>(candles.length).fill(0);
+  const plusDm: number[] = new Array<number>(candles.length).fill(0);
+  const minusDm: number[] = new Array<number>(candles.length).fill(0);
+
+  for (let i = 1; i < candles.length; i++) {
+    const upMove = candles[i].high - candles[i - 1].high;
+    const downMove = candles[i - 1].low - candles[i].low;
+    plusDm[i] = upMove > downMove && upMove > 0 ? upMove : 0;
+    minusDm[i] = downMove > upMove && downMove > 0 ? downMove : 0;
+    tr[i] = Math.max(
+      candles[i].high - candles[i].low,
+      Math.abs(candles[i].high - candles[i - 1].close),
+      Math.abs(candles[i].low - candles[i - 1].close)
+    );
+  }
+
+  let smTr = 0;
+  let smPlus = 0;
+  let smMinus = 0;
+  for (let i = 1; i <= n; i++) {
+    smTr += tr[i];
+    smPlus += plusDm[i];
+    smMinus += minusDm[i];
+  }
+
+  const dxValues: number[] = [];
+  for (let i = n; i < candles.length; i++) {
+    if (i > n) {
+      smTr = smTr - smTr / n + tr[i];
+      smPlus = smPlus - smPlus / n + plusDm[i];
+      smMinus = smMinus - smMinus / n + minusDm[i];
+    }
+    const pdi = smTr > 0 ? (100 * smPlus) / smTr : 0;
+    const mdi = smTr > 0 ? (100 * smMinus) / smTr : 0;
+    const denom = pdi + mdi;
+    dxValues.push(denom > 0 ? (100 * Math.abs(pdi - mdi)) / denom : 0);
+  }
+
+  if (dxValues.length < n) return null;
+  let adx = dxValues.slice(0, n).reduce((a, b) => a + b, 0) / n;
+  for (let i = n; i < dxValues.length; i++) {
+    adx = (adx * (n - 1) + dxValues[i]) / n;
+  }
+  return Number(adx.toFixed(2));
+}
+
+export function detectBollingerSqueeze(candles: CandleBar[], period = 20): boolean {
+  if (candles.length < period + 15) return false;
+  const closes = candles.map((c) => c.close);
+  const widths: number[] = [];
+  for (let end = period; end <= closes.length; end++) {
+    const slice = closes.slice(end - period, end);
+    const mean = slice.reduce((a, b) => a + b, 0) / period;
+    if (mean <= 0) continue;
+    const variance = slice.reduce((acc, v) => acc + (v - mean) * (v - mean), 0) / period;
+    const std = Math.sqrt(variance);
+    widths.push((4 * std) / mean);
+  }
+  if (widths.length < 15) return false;
+  const currentWidth = widths[widths.length - 1];
+  const recentAvg = widths.slice(-20).reduce((a, b) => a + b, 0) / Math.min(20, widths.length);
+  return currentWidth < recentAvg * 0.68;
+}
+
 export function detectCandlePattern(candles: CandleBar[]): string {
   if (candles.length < 3) return 'Insufficient Bars';
   const cur = candles[candles.length - 1];
@@ -156,6 +224,8 @@ export function computeTechnicals(
   const rsi = calculateRSI(closes, periods.rsi);
   const macd = calculateMACD(closes);
   const atr = calculateATR(candles, 14);
+  const adx = calculateADX(candles, 14);
+  const bollingerSqueeze = detectBollingerSqueeze(candles, 20);
 
   const recentVols = candles.slice(-21, -1).map((c) => c.volume).filter((v) => v > 0);
   const lastVol = candles[candles.length - 1]?.volume ?? 0;
@@ -167,28 +237,52 @@ export function computeTechnicals(
 
   let trendBias: TechnicalSnapshot['trendBias'] = 'SIDEWAYS';
   if (ema9 !== null && ema20 !== null && ema50 !== null) {
-    if (lastClose > ema9 && ema9 > ema20 && ema20 >= ema50 * 0.999) {
+    const prevEma20 =
+      emaMidSeries.length >= 4 ? emaMidSeries[emaMidSeries.length - 4] : ema20;
+    const ema20Rising = ema20 > prevEma20;
+    const ema20Falling = ema20 < prevEma20;
+    const minSep = (atr ?? lastClose * 0.002) * 0.18;
+
+    if (
+      lastClose > ema9 &&
+      ema9 > ema20 &&
+      ema20 > ema50 &&
+      ema20 - ema50 >= minSep &&
+      ema20Rising
+    ) {
       trendBias = 'BULLISH';
-    } else if (lastClose < ema9 && ema9 < ema20 && ema20 <= ema50 * 1.001) {
+    } else if (
+      lastClose < ema9 &&
+      ema9 < ema20 &&
+      ema20 < ema50 &&
+      ema50 - ema20 >= minSep &&
+      ema20Falling
+    ) {
       trendBias = 'BEARISH';
-    } else if (lastClose > ema20 && ema9 > ema20) {
+    } else if (lastClose > ema20 && ema9 > ema20 && ema20 >= ema50 && ema20Rising) {
       trendBias = 'BULLISH';
-    } else if (lastClose < ema20 && ema9 < ema20) {
+    } else if (lastClose < ema20 && ema9 < ema20 && ema20 <= ema50 && ema20Falling) {
       trendBias = 'BEARISH';
     }
   }
 
   let momentumState: TechnicalSnapshot['momentumState'] = 'NEUTRAL';
   const hist = macd?.histogram ?? 0;
-  if (trendBias === 'BULLISH' && (rsi ?? 50) >= 60 && hist > 0) {
+  if (trendBias === 'BULLISH' && (rsi ?? 50) >= 58 && hist > 0) {
     momentumState = 'STRONG_BULLISH';
-  } else if (trendBias === 'BULLISH' && (rsi ?? 50) >= 52) {
+  } else if (trendBias === 'BULLISH' && (rsi ?? 50) >= 51) {
     momentumState = 'BULLISH';
-  } else if (trendBias === 'BEARISH' && (rsi ?? 50) <= 40 && hist < 0) {
+  } else if (trendBias === 'BEARISH' && (rsi ?? 50) <= 42 && hist < 0) {
     momentumState = 'STRONG_BEARISH';
-  } else if (trendBias === 'BEARISH' && (rsi ?? 50) <= 48) {
+  } else if (trendBias === 'BEARISH' && (rsi ?? 50) <= 49) {
     momentumState = 'BEARISH';
   }
+
+  const regime: TechnicalSnapshot['regime'] = bollingerSqueeze
+    ? 'SQUEEZE'
+    : (adx ?? 22) >= 20 && trendBias !== 'SIDEWAYS'
+      ? 'TRENDING'
+      : 'CHOPPY';
 
   return {
     ema9,
@@ -198,6 +292,9 @@ export function computeTechnicals(
     rsi,
     macd,
     atr,
+    adx,
+    bollingerSqueeze,
+    regime,
     volumeRatio,
     candlePattern: detectCandlePattern(candles),
     trendBias,
@@ -232,8 +329,8 @@ export function computeLevels(
   const breakdownLevel = Number((immediateSupport - atr * 0.15).toFixed(2));
 
   const midBand = (immediateResistance + immediateSupport) / 2;
-  const noTradeZoneLow = Number((midBand - atr * 0.35).toFixed(2));
-  const noTradeZoneHigh = Number((midBand + atr * 0.35).toFixed(2));
+  const noTradeZoneLow = Number((midBand - atr * 0.25).toFixed(2));
+  const noTradeZoneHigh = Number((midBand + atr * 0.25).toFixed(2));
 
   return {
     immediateSupport,
@@ -345,8 +442,7 @@ export function buildAtmOptionRecommendation(
   }
 
   const optionType = direction === 'BUY' ? 'CE' : 'PE';
-  // Prefer ATM or 1-step ITM/near-ATM for clean delta & theta discipline
-  const recommendedStrike = direction === 'BUY' ? atmStrike : atmStrike;
+  const recommendedStrike = atmStrike;
   return {
     spotPrice,
     recommendedStrike,
@@ -373,181 +469,201 @@ export function evaluateMultiTimeframeStrategy(params: {
 
   const isCrude = Boolean(instrument.ema9Priority && config.comexCrudeEma9Priority);
 
-  // Determine 15m Trend & 5m Entry alignment
+  // Strict higher-timeframe directional bias + 5m pullback/momentum sync
   const bull15m = tTech.trendBias === 'BULLISH';
   const bear15m = tTech.trendBias === 'BEARISH';
   const bull5m =
     eTech.trendBias === 'BULLISH' ||
-    (eTech.ema9 !== null && spotPrice > eTech.ema9 && (eTech.macd?.histogram ?? 0) > 0);
+    (eTech.ema9 !== null &&
+      eTech.ema20 !== null &&
+      spotPrice > eTech.ema9 &&
+      eTech.ema9 >= eTech.ema20 &&
+      (eTech.macd?.histogram ?? 0) > 0);
   const bear5m =
     eTech.trendBias === 'BEARISH' ||
-    (eTech.ema9 !== null && spotPrice < eTech.ema9 && (eTech.macd?.histogram ?? 0) < 0);
+    (eTech.ema9 !== null &&
+      eTech.ema20 !== null &&
+      spotPrice < eTech.ema9 &&
+      eTech.ema9 <= eTech.ema20 &&
+      (eTech.macd?.histogram ?? 0) < 0);
 
   let candidateDirection: 'BUY' | 'SELL' | 'NO_TRADE' = 'NO_TRADE';
   if (bull15m && bull5m) candidateDirection = 'BUY';
   else if (bear15m && bear5m) candidateDirection = 'SELL';
 
-  // Checklist evaluation (transparent 100-point rubric)
+  // Anti-exhaustion check: avoid buying tops or selling bottoms
+  const rsiVal = eTech.rsi ?? 50;
+  const distFromEma20 = eTech.ema20 !== null ? Math.abs(spotPrice - eTech.ema20) : 0;
+  const isOverextended =
+    (candidateDirection === 'BUY' && (rsiVal > 72 || distFromEma20 > atr * 2.3)) ||
+    (candidateDirection === 'SELL' && (rsiVal < 28 || distFromEma20 > atr * 2.3));
+
   const checklist: ChecklistItem[] = [];
   const reasonsFor: string[] = [];
   const reasonsAgainst: string[] = [];
   let score = 0;
 
-  // 1. 15m Trend Alignment (25 pts)
+  // 1. Higher-Timeframe Trend Alignment (25 pts)
   const trendAligned = (candidateDirection === 'BUY' && bull15m) || (candidateDirection === 'SELL' && bear15m);
   if (trendAligned) {
     score += 25;
     checklist.push({
-      label: `${config.trendTimeframe} Primary Trend Alignment`,
+      label: `${config.trendTimeframe} Trend Slope & Alignment`,
       passed: true,
-      detail: `${config.trendTimeframe} bias is ${tTech.trendBias} (EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow})`,
+      detail: `${config.trendTimeframe} bias is ${tTech.trendBias} with rising EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} separation`,
     });
-    reasonsFor.push(`${config.trendTimeframe} trend confirms ${tTech.trendBias.toLowerCase()} directional structure.`);
+    reasonsFor.push(`${config.trendTimeframe} trend confirms directional impulse with clean EMA separation.`);
   } else {
     checklist.push({
-      label: `${config.trendTimeframe} Primary Trend Alignment`,
+      label: `${config.trendTimeframe} Trend Slope & Alignment`,
       passed: false,
-      detail: `${config.trendTimeframe} bias is ${tTech.trendBias}; lacks decisive multi-timeframe trend sync.`,
+      detail: `${config.trendTimeframe} bias is ${tTech.trendBias}; choppy or unconfirmed higher-timeframe slope.`,
     });
-    reasonsAgainst.push(`${config.trendTimeframe} trend (${tTech.trendBias}) does not cleanly align with ${config.entryTimeframe} entry.`);
+    reasonsAgainst.push(`${config.trendTimeframe} structure (${tTech.trendBias}) lacks clean directional trend.`);
   }
 
-  // 2. 5m Entry Confirmation (20 pts)
+  // 2. Entry Confirmation & Pullback Quality (20 pts)
   const entryConfirmed =
-    (candidateDirection === 'BUY' && bull5m) || (candidateDirection === 'SELL' && bear5m);
+    ((candidateDirection === 'BUY' && bull5m) || (candidateDirection === 'SELL' && bear5m)) &&
+    !isOverextended;
   if (entryConfirmed) {
     score += 20;
     checklist.push({
-      label: `${config.entryTimeframe} Entry & Price Action Trigger`,
+      label: `${config.entryTimeframe} Entry & Anti-Exhaustion Filter`,
       passed: true,
-      detail: `Pattern: ${eTech.candlePattern} supporting ${candidateDirection}`,
+      detail: `${eTech.candlePattern} within value zone (${(distFromEma20 / Math.max(atr, 1e-6)).toFixed(2)}x ATR from EMA ${config.emaMid})`,
     });
-    reasonsFor.push(`${config.entryTimeframe} price action (${eTech.candlePattern}) supports entry.`);
+    reasonsFor.push(`${config.entryTimeframe} entry is inside high-probability pullback/breakout zone (not overextended).`);
   } else {
     checklist.push({
-      label: `${config.entryTimeframe} Entry & Price Action Trigger`,
+      label: `${config.entryTimeframe} Entry & Anti-Exhaustion Filter`,
       passed: false,
-      detail: `Pattern: ${eTech.candlePattern} — waiting for clear ${config.entryTimeframe} breakout/breakdown.`,
+      detail: isOverextended
+        ? `Extended ${(distFromEma20 / Math.max(atr, 1e-6)).toFixed(2)}x ATR from EMA ${config.emaMid} / RSI ${rsiVal} — avoiding chase.`
+        : `Pattern: ${eTech.candlePattern} — waiting for cleaner ${config.entryTimeframe} structure.`,
     });
-    reasonsAgainst.push(`${config.entryTimeframe} trigger candle is not aligned with primary direction.`);
+    reasonsAgainst.push(
+      isOverextended
+        ? `Price is overextended from EMA ${config.emaMid}; chasing increases stop-loss risk.`
+        : `${config.entryTimeframe} trigger is not aligned with primary trend.`
+    );
   }
 
-  // 3. EMA Alignment & Crude EMA 9 Special Rule (15 pts)
+  // 3. EMA Stack & Crude EMA 9 Priority (15 pts)
   const emaAligned =
     candidateDirection === 'BUY'
       ? eTech.ema9 !== null &&
         eTech.ema20 !== null &&
+        eTech.ema50 !== null &&
         spotPrice > eTech.ema9 &&
-        eTech.ema9 >= eTech.ema20
+        eTech.ema9 > eTech.ema20 &&
+        eTech.ema20 >= eTech.ema50 * 0.9995
       : candidateDirection === 'SELL'
         ? eTech.ema9 !== null &&
           eTech.ema20 !== null &&
+          eTech.ema50 !== null &&
           spotPrice < eTech.ema9 &&
-          eTech.ema9 <= eTech.ema20
+          eTech.ema9 < eTech.ema20 &&
+          eTech.ema20 <= eTech.ema50 * 1.0005
         : false;
   if (emaAligned) {
     score += 15;
     checklist.push({
-      label: isCrude ? `EMA ${config.emaFast} (Crude Oil Priority) & Stack` : `EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} Alignment`,
+      label: isCrude ? `EMA ${config.emaFast} (Crude Oil Priority) & Stack` : `EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} Stack`,
       passed: true,
-      detail: `Price (${spotPrice}) cleanly respecting EMA ${config.emaFast} (${eTech.ema9}) & EMA ${config.emaMid} (${eTech.ema20}).`,
+      detail: `Price (${spotPrice}) aligned above/below EMA ${config.emaFast} (${eTech.ema9}) -> EMA ${config.emaMid} (${eTech.ema20}) -> EMA ${config.emaSlow} (${eTech.ema50}).`,
     });
     reasonsFor.push(
       isCrude
-        ? `COMEX/WTI Crude Oil EMA 9 priority condition satisfied (${spotPrice} vs EMA 9 ${eTech.ema9}).`
-        : `EMA ${config.emaFast}/${config.emaMid} stack confirms directional control.`
+        ? `Crude Oil EMA 9 momentum stack satisfied (${spotPrice} vs EMA 9 ${eTech.ema9}).`
+        : `Full EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} directional stack aligned.`
     );
   } else {
     checklist.push({
-      label: isCrude ? `EMA ${config.emaFast} (Crude Oil Priority) & Stack` : `EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} Alignment`,
+      label: isCrude ? `EMA ${config.emaFast} (Crude Oil Priority) & Stack` : `EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} Stack`,
       passed: false,
-      detail: `Price and EMA ${config.emaFast}/${config.emaMid} show compression or mean-reversion.`,
+      detail: `EMAs are tangled or counter-aligned on ${config.entryTimeframe}.`,
     });
-    reasonsAgainst.push(
-      isCrude
-        ? `Crude Oil EMA 9 momentum filter not cleanly triggered.`
-        : `EMA ${config.emaFast}/${config.emaMid} alignment is incomplete.`
-    );
+    reasonsAgainst.push(`EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} stack lacks full trend alignment.`);
   }
 
-  // 4. VWAP & Volume Confirmation (15 pts)
+  // 4. VWAP & Volume Participation (15 pts)
   const vwapPass =
     candidateDirection === 'BUY'
       ? eTech.vwap !== null && spotPrice >= eTech.vwap
       : candidateDirection === 'SELL'
         ? eTech.vwap !== null && spotPrice <= eTech.vwap
         : false;
-  const volPass = eTech.volumeRatio === null ? true : eTech.volumeRatio >= 0.9;
+  const volPass = eTech.volumeRatio === null ? true : eTech.volumeRatio >= 1.0;
   if (vwapPass && volPass) {
     score += 15;
     checklist.push({
-      label: 'VWAP & Volume Confirmation',
+      label: 'VWAP & Institutional Volume',
       passed: true,
-      detail: `Price vs VWAP (${eTech.vwap}) favorable${eTech.volumeRatio ? `, Volume ${eTech.volumeRatio}x avg` : ''}.`,
+      detail: `Favorable VWAP (${eTech.vwap}) control${eTech.volumeRatio ? `, Volume ${eTech.volumeRatio}x avg` : ''}.`,
     });
-    reasonsFor.push(`VWAP positioning supports ${candidateDirection} side.`);
+    reasonsFor.push(`Institutional VWAP positioning and volume support ${candidateDirection} side.`);
   } else {
-    if (vwapPass || volPass) score += 7;
+    if (vwapPass) score += 6;
     checklist.push({
-      label: 'VWAP & Volume Confirmation',
+      label: 'VWAP & Institutional Volume',
       passed: false,
-      detail: `VWAP=${eTech.vwap ?? 'N/A'}, Vol Ratio=${eTech.volumeRatio ?? 'N/A'}x.`,
+      detail: `VWAP=${eTech.vwap ?? 'N/A'}, Vol Ratio=${eTech.volumeRatio ?? 'N/A'}x (need >=1.0x).`,
     });
-    reasonsAgainst.push(`Volume/VWAP confirmation is partial or muted.`);
+    reasonsAgainst.push(`Volume/VWAP confirmation is weak (<1.0x average or wrong side of VWAP).`);
   }
 
   // 5. RSI & MACD Momentum (15 pts)
-  const rsiVal = eTech.rsi ?? 50;
   const macdHist = eTech.macd?.histogram ?? 0;
   const momentumPass =
     candidateDirection === 'BUY'
-      ? rsiVal >= config.rsiBullishMin && rsiVal <= 76 && macdHist > 0
+      ? rsiVal >= config.rsiBullishMin && rsiVal <= 70 && macdHist > 0
       : candidateDirection === 'SELL'
-        ? rsiVal <= config.rsiBearishMax && rsiVal >= 24 && macdHist < 0
+        ? rsiVal <= config.rsiBearishMax && rsiVal >= 30 && macdHist < 0
         : false;
   if (momentumPass) {
     score += 15;
     checklist.push({
       label: 'RSI & MACD Momentum',
       passed: true,
-      detail: `RSI(${config.rsiPeriod})=${rsiVal}, MACD Hist=${macdHist}.`,
+      detail: `RSI(${config.rsiPeriod})=${rsiVal} (sweet spot), MACD Hist=${macdHist}.`,
     });
-    reasonsFor.push(`RSI (${rsiVal}) and MACD histogram (${macdHist}) confirm active momentum.`);
+    reasonsFor.push(`RSI (${rsiVal}) and MACD histogram (${macdHist}) confirm healthy trend momentum.`);
   } else {
     checklist.push({
       label: 'RSI & MACD Momentum',
       passed: false,
-      detail: `RSI=${rsiVal} (target ${candidateDirection === 'BUY' ? `>=${config.rsiBullishMin}` : `<=${config.rsiBearishMax}`}), MACD Hist=${macdHist}.`,
+      detail: `RSI=${rsiVal}, MACD Hist=${macdHist}.`,
     });
-    reasonsAgainst.push(`RSI/MACD momentum lacks strong impulse or approaches exhaustion.`);
+    reasonsAgainst.push(`RSI/MACD momentum lacks impulse or is in exhaustion territory.`);
   }
 
-  // 6. Support / Resistance & No-Trade Zone Positioning (10 pts)
+  // 6. Structural Clearance (10 pts)
   const inNoTradeZone = spotPrice >= eLevels.noTradeZoneLow && spotPrice <= eLevels.noTradeZoneHigh;
   if (!inNoTradeZone && candidateDirection !== 'NO_TRADE') {
     score += 10;
     checklist.push({
-      label: 'Support/Resistance & No-Trade Zone',
+      label: 'Structural S/R Clearance',
       passed: true,
-      detail: `Price outside No-Trade Zone (${eLevels.noTradeZoneLow} - ${eLevels.noTradeZoneHigh}).`,
+      detail: `Price clear of chop band (${eLevels.noTradeZoneLow} - ${eLevels.noTradeZoneHigh}).`,
     });
-    reasonsFor.push(`Clean structural clearance outside the choppy No-Trade Zone.`);
+    reasonsFor.push(`Clean structural clearance away from mid-range chop.`);
   } else {
     checklist.push({
-      label: 'Support/Resistance & No-Trade Zone',
+      label: 'Structural S/R Clearance',
       passed: false,
       detail: inNoTradeZone
-        ? `Price (${spotPrice}) is inside No-Trade Zone (${eLevels.noTradeZoneLow} - ${eLevels.noTradeZoneHigh}).`
-        : 'Awaiting directional break of S/R structure.',
+        ? `Price (${spotPrice}) inside chop band (${eLevels.noTradeZoneLow} - ${eLevels.noTradeZoneHigh}).`
+        : 'Awaiting clear directional break.',
     });
     reasonsAgainst.push(
       inNoTradeZone
-        ? `Price is trapped inside the intraday No-Trade Zone (${eLevels.noTradeZoneLow}–${eLevels.noTradeZoneHigh}).`
-        : `Insufficient clearance from nearby S/R structure.`
+        ? `Price is trapped inside the intraday chop zone (${eLevels.noTradeZoneLow}–${eLevels.noTradeZoneHigh}).`
+        : `Insufficient S/R structural clearance.`
     );
   }
 
-  // Compute structural Entry, SL, Targets
+  // Compute structural Entry, SL (with breathing room to prevent stop-hunts), and asymmetric Targets
   const roundPrice = (v: number) => Number(v.toFixed(spotPrice > 500 ? 2 : 4));
   let entryPrice = roundPrice(spotPrice);
   let stopLoss = 0;
@@ -557,23 +673,29 @@ export function evaluateMultiTimeframeStrategy(params: {
   let invalidationLevel = 0;
 
   if (candidateDirection === 'BUY') {
-    entryPrice = roundPrice(Math.max(spotPrice, eLevels.breakoutLevel - atr * 0.1));
-    const structuralSl = Math.min(eLevels.immediateSupport, eTech.ema20 ?? spotPrice - atr * 1.1);
-    const risk = Math.max(atr * 1.1, Math.min(atr * 2.2, entryPrice - structuralSl));
+    entryPrice = roundPrice(spotPrice);
+    const structuralFloor = Math.min(
+      eLevels.immediateSupport,
+      eTech.ema20 !== null ? eTech.ema20 - atr * 0.45 : spotPrice - atr * 1.6
+    );
+    const risk = Math.max(atr * 1.6, Math.min(atr * 2.5, entryPrice - structuralFloor));
     stopLoss = roundPrice(entryPrice - risk);
-    invalidationLevel = roundPrice(stopLoss - atr * 0.25);
+    invalidationLevel = roundPrice(stopLoss - atr * 0.3);
     target1 = roundPrice(entryPrice + risk * 1.5);
-    target2 = roundPrice(entryPrice + risk * 2.2);
-    target3 = roundPrice(entryPrice + risk * 3.0);
+    target2 = roundPrice(entryPrice + risk * 2.4);
+    target3 = roundPrice(entryPrice + risk * 3.4);
   } else if (candidateDirection === 'SELL') {
-    entryPrice = roundPrice(Math.min(spotPrice, eLevels.breakdownLevel + atr * 0.1));
-    const structuralSl = Math.max(eLevels.immediateResistance, eTech.ema20 ?? spotPrice + atr * 1.1);
-    const risk = Math.max(atr * 1.1, Math.min(atr * 2.2, structuralSl - entryPrice));
+    entryPrice = roundPrice(spotPrice);
+    const structuralCap = Math.max(
+      eLevels.immediateResistance,
+      eTech.ema20 !== null ? eTech.ema20 + atr * 0.45 : spotPrice + atr * 1.6
+    );
+    const risk = Math.max(atr * 1.6, Math.min(atr * 2.5, structuralCap - entryPrice));
     stopLoss = roundPrice(entryPrice + risk);
-    invalidationLevel = roundPrice(stopLoss + atr * 0.25);
+    invalidationLevel = roundPrice(stopLoss + atr * 0.3);
     target1 = roundPrice(entryPrice - risk * 1.5);
-    target2 = roundPrice(entryPrice - risk * 2.2);
-    target3 = roundPrice(entryPrice - risk * 3.0);
+    target2 = roundPrice(entryPrice - risk * 2.4);
+    target3 = roundPrice(entryPrice - risk * 3.4);
   }
 
   const riskDist = Math.abs(entryPrice - stopLoss);
@@ -585,15 +707,50 @@ export function evaluateMultiTimeframeStrategy(params: {
   checklist.push({
     label: `Risk-to-Reward (>= 1:${config.minRiskReward})`,
     passed: rrPass && candidateDirection !== 'NO_TRADE',
-    detail: rrPass ? `Calculated R:R is ${rrString} based on ATR & S/R structure.` : `Risk/Reward threshold not met.`,
+    detail: rrPass ? `Calculated R:R is ${rrString} with 1.6x–2.5x ATR swing SL.` : `Risk/Reward threshold not met.`,
   });
 
-  // Final Discipline Gate -> NO TRADE if score < minSetupScore or timeframes conflict or inside No-Trade Zone
+  // 7. Market Regime & ADX(14) Chop Filter
+  const adxThreshold = Math.max(10, Math.min(50, Number(config.adxMinThreshold ?? 18)));
+  const entryAdx = eTech.adx ?? tTech.adx ?? null;
+  const adxPass = entryAdx === null ? true : entryAdx >= adxThreshold;
+  const regimeLabel = eTech.regime ?? 'TRENDING';
+  checklist.push({
+    label: `ADX(14) Regime Filter (>= ${adxThreshold})`,
+    passed: adxPass && !eTech.bollingerSqueeze,
+    detail:
+      entryAdx !== null
+        ? `ADX=${entryAdx} · Regime: ${regimeLabel}${eTech.bollingerSqueeze ? ' (Bollinger Squeeze compression — wait for expansion)' : ''}.`
+        : `Regime: ${regimeLabel}.`,
+  });
+  if (!adxPass) {
+    reasonsAgainst.push(`ADX(14) is ${entryAdx} (< ${adxThreshold}), indicating low-conviction sideways chop.`);
+  } else if (eTech.bollingerSqueeze) {
+    reasonsAgainst.push('Bollinger Squeeze detected; wait for directional volatility expansion.');
+  } else if (entryAdx !== null) {
+    reasonsFor.push(`ADX(14) at ${entryAdx} confirms active directional trend strength (${regimeLabel}).`);
+  }
+
+  // 8. Active Liquidity Session Filter
+  const sessionFilterEnabled = config.enableSessionFilter !== false;
+  const sessionState = isLiquiditySessionActive(instrument.segment, instrument.id);
+  checklist.push({
+    label: 'Active Session Liquidity Window',
+    passed: !sessionFilterEnabled || sessionState.active,
+    detail: sessionState.label,
+  });
+  if (sessionFilterEnabled && !sessionState.active) {
+    reasonsAgainst.push(`${sessionState.label} — lower institutional follow-through.`);
+  }
+
+  // Strict Discipline Gate -> NO TRADE if chop, low ADX (unless A+ score >= 88), overextended, low score, or weak R:R
   const passesGate =
     candidateDirection !== 'NO_TRADE' &&
+    !isOverextended &&
     score >= config.minSetupScore &&
     rrPass &&
-    !inNoTradeZone;
+    (adxPass || score >= 88) &&
+    (!inNoTradeZone || score >= 85);
 
   const finalDirection = passesGate ? candidateDirection : 'NO_TRADE';
   const finalStatus = passesGate

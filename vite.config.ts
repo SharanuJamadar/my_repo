@@ -19,8 +19,8 @@ export default defineConfig(() => {
           short_name: 'My Trade',
           description:
             'Real-time multi-timeframe trading analysis, custom Pine strategies, live market news, and execution terminal.',
-          theme_color: '#090B0E',
-          background_color: '#090B0E',
+          theme_color: '#F4F6FA',
+          background_color: '#F4F6FA',
           display: 'standalone',
           orientation: 'any',
           start_url: '/',

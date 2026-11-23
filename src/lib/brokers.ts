@@ -26,11 +26,11 @@ export const BROKER_APPS: BrokerAppMeta[] = [
   },
   {
     id: 'EXNESS',
-    name: 'Exness',
-    markets: 'XAUUSD, XAGUSD, US Crude Oil, BTCUSDT',
-    authProtocol: 'MT5 WebTerminal / Execution Bridge',
+    name: 'Exness (MT5 Live Bridge)',
+    markets: 'XAUUSD, XAGUSD, US Crude Oil, Forex, Crypto, Indices',
+    authProtocol: 'HTTPS MT5 Execution Bridge (MetaApi / Python MT5)',
     portalUrl: 'https://www.exness.com/webterminal/',
-    envHint: 'EXNESS_BRIDGE_URL',
+    envHint: 'EXNESS_BRIDGE_URL + EXNESS_API_TOKEN',
   },
   {
     id: 'UPSTOX',

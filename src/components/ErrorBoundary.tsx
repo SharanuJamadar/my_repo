@@ -30,13 +30,13 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
       }
 
       return (
-        <div className="min-h-screen bg-[#090B0E] text-[#E6EDF3] flex items-center justify-center p-6">
-          <div className="max-w-lg w-full bg-[#11141A] border border-red-500/30 rounded-xl p-6 space-y-4">
-            <div className="flex items-center gap-3 text-red-400">
+        <div className="min-h-screen bg-[#F4F6FA] dark:bg-[#08101E] text-slate-900 dark:text-slate-100 flex items-center justify-center p-6">
+          <div className="max-w-lg w-full bg-white dark:bg-[#0E182A] border border-rose-200 dark:border-rose-500/35 rounded-xl p-6 space-y-4">
+            <div className="flex items-center gap-3 text-rose-700 dark:text-rose-400">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h2 className="text-lg font-semibold">My Trade — Session Recovery</h2>
             </div>
-            <p className="text-sm text-slate-300 leading-relaxed">
+            <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed">
               {parsedDetail?.error
                 ? `Database operation (${parsedDetail.operationType} on ${parsedDetail.path || 'collection'}) returned: ${parsedDetail.error}`
                 : this.state.errorMessage}

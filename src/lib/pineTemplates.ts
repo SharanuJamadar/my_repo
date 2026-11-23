@@ -9,96 +9,104 @@ export interface PineTemplatePreset {
   quantity: number;
   stopLossPct: number;
   takeProfitPct: number;
+  riskPerTradePct: number;
+  trailingStop: boolean;
   pineCode: string;
 }
 
 export const PINE_STRATEGY_TEMPLATES: PineTemplatePreset[] = [
   {
     id: 'sharan-ema-vwap-rsi',
-    name: 'My Trade EMA 9/20 Crossover + VWAP + RSI',
+    name: 'My Trade Pro: Pullback + EMA 50 Slope + VWAP + MACD',
     description:
-      'Flagship intraday momentum strategy: EMA 9 crosses EMA 20 above/below VWAP with RSI filter.',
+      'High-win-rate trend continuation pullback strategy: trades EMA 9/20/50 trend alignment with rising EMA 50 slope, VWAP support/resistance, MACD histogram confirmation, and 1:3 R:R profit lock.',
     instrumentId: 'XAUUSD',
     timeframe: '5m',
     quantity: 2,
-    stopLossPct: 0.45,
-    takeProfitPct: 0.9,
+    stopLossPct: 0.55,
+    takeProfitPct: 1.65,
+    riskPerTradePct: 2.5,
+    trailingStop: true,
     pineCode: `//@version=5
-strategy("My Trade EMA 9/20 + VWAP + RSI", overlay=true)
+strategy("My Trade Pro: Pullback + EMA50 + VWAP + MACD", overlay=true)
 
-fastLen = input.int(9, "Fast EMA")
-midLen = input.int(20, "Mid EMA")
-slowLen = input.int(50, "Slow EMA")
-rsiLen = input.int(14, "RSI Length")
-
-emaFast = ta.ema(close, fastLen)
-emaMid = ta.ema(close, midLen)
-emaSlow = ta.ema(close, slowLen)
+ema9 = ta.ema(close, 9)
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
 vwapVal = ta.vwap
-rsiVal = ta.rsi(close, rsiLen)
+rsiVal = ta.rsi(close, 14)
+[macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
 
-longCondition = ta.crossover(emaFast, emaMid) and close > vwapVal and rsiVal >= 52
-shortCondition = ta.crossunder(emaFast, emaMid) and close < vwapVal and rsiVal <= 48
+longCondition = ema9 > ema20 and ema20 > ema50 and ta.rising(ema50, 3) and close > vwapVal and low[1] <= ema9 and close > ema9 and close > close[1] and rsiVal >= 50 and rsiVal <= 68 and hist > 0
+shortCondition = ema9 < ema20 and ema20 < ema50 and ta.falling(ema50, 3) and close < vwapVal and high[1] >= ema9 and close < ema9 and close < close[1] and rsiVal <= 50 and rsiVal >= 32 and hist < 0
 
 if (longCondition)
-    strategy.entry("SHARAN_LONG", strategy.long)
+    strategy.entry("PRO_LONG", strategy.long)
 
 if (shortCondition)
-    strategy.entry("SHARAN_SHORT", strategy.short)
+    strategy.entry("PRO_SHORT", strategy.short)
 `,
   },
   {
     id: 'crude-ema9-momentum',
-    name: 'Crude Oil / Gold EMA 9 Price Breakout',
+    name: 'Crude & Gold: Supertrend + ADX(14) + EMA 9 Trend',
     description:
-      'Prioritizes EMA 9 price crossovers with EMA 20 trend alignment and RSI confirmation.',
+      'Filters sideways chop with ADX(14) >= 18 and Supertrend(2.5, 10) trend alignment, riding explosive commodity waves with EMA 9 momentum and trailing stop protection.',
     instrumentId: 'MCX_CRUDEOIL',
     timeframe: '5m',
     quantity: 10,
     stopLossPct: 0.65,
-    takeProfitPct: 1.3,
+    takeProfitPct: 1.85,
+    riskPerTradePct: 2.5,
+    trailingStop: true,
     pineCode: `//@version=5
-strategy("Crude Oil EMA 9 Momentum Scalp", overlay=true)
+strategy("Crude & Gold Supertrend + ADX(14) + EMA9", overlay=true)
 
+[stVal, stDir] = ta.supertrend(2.5, 10)
+adxVal = ta.adx(14)
 ema9 = ta.ema(close, 9)
 ema20 = ta.ema(close, 20)
 rsi14 = ta.rsi(close, 14)
 
-longCondition = ta.crossover(close, ema9) and ema9 >= ema20 and rsi14 > 53
-shortCondition = ta.crossunder(close, ema9) and ema9 <= ema20 and rsi14 < 47
+longCondition = stDir > 0 and adxVal >= 18 and close > ema9 and ema9 > ema20 and close > close[1] and rsi14 >= 50 and rsi14 <= 70
+shortCondition = stDir < 0 and adxVal >= 18 and close < ema9 and ema9 < ema20 and close < close[1] and rsi14 <= 50 and rsi14 >= 30
 
 if (longCondition)
-    strategy.entry("CRUDE_BUY", strategy.long)
+    strategy.entry("SUPER_LONG", strategy.long)
 
 if (shortCondition)
-    strategy.entry("CRUDE_SELL", strategy.short)
+    strategy.entry("SUPER_SHORT", strategy.short)
 `,
   },
   {
     id: 'btc-macd-ema50-breakout',
-    name: 'Crypto / Index MACD + EMA 50 Trend Bot',
+    name: 'Crypto & Index: 1H Supertrend + EMA 50 Slope + ADX',
     description:
-      'Captures directional swings when MACD crosses signal line in direction of EMA 50 trend.',
+      'Captures major Crypto & US Index directional swings on 1H bars with Supertrend(2.8, 10), ADX >= 22 chop rejection, rising/falling EMA 50 slope, and trailing profit lock.',
     instrumentId: 'BTCUSDT',
-    timeframe: '15m',
+    timeframe: '1h',
     quantity: 0.25,
-    stopLossPct: 0.8,
-    takeProfitPct: 1.8,
+    stopLossPct: 1.2,
+    takeProfitPct: 3.2,
+    riskPerTradePct: 2.5,
+    trailingStop: true,
     pineCode: `//@version=5
-strategy("MACD + EMA 50 Trend Bot", overlay=true)
+strategy("Index & Crypto Supertrend + EMA50 + ADX", overlay=true)
 
+[stVal, stDir] = ta.supertrend(2.8, 10)
+ema20 = ta.ema(close, 20)
 ema50 = ta.ema(close, 50)
-[macdLine, signalLine, hist] = ta.macd(close, 12, 26, 9)
+adxVal = ta.adx(14)
 rsi14 = ta.rsi(close, 14)
 
-longCondition = ta.crossover(macdLine, signalLine) and close > ema50 and rsi14 > 50
-shortCondition = ta.crossunder(macdLine, signalLine) and close < ema50 and rsi14 < 50
+longCondition = stDir > 0 and close > ema50 and ta.rising(ema50, 3) and adxVal >= 22 and close > ema20 and close > close[1] and rsi14 >= 52 and rsi14 <= 68
+shortCondition = stDir < 0 and close < ema50 and ta.falling(ema50, 3) and adxVal >= 22 and close < ema20 and close < close[1] and rsi14 <= 48 and rsi14 >= 32
 
 if (longCondition)
-    strategy.entry("MACD_LONG", strategy.long)
+    strategy.entry("IDX_LONG", strategy.long)
 
 if (shortCondition)
-    strategy.entry("MACD_SHORT", strategy.short)
+    strategy.entry("IDX_SHORT", strategy.short)
 `,
   },
 ];

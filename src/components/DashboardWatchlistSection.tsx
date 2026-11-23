@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpRight, Plus, RefreshCw, Search, X } from 'lucide-react';
 import { INSTRUMENTS, type MarketQuoteResponse } from '../types/trading';
 import { loadLocalCustomWatchlist, saveLocalCustomWatchlist } from '../lib/localStore';
+import { Sparkline } from './Sparkline';
 
 interface DashboardWatchlistSectionProps {
   onOpenInTerminal: (instrumentId: string) => void;
@@ -274,11 +275,11 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
   };
 
   return (
-    <section className="bg-[#11141A] border border-white/[0.08] rounded-xl">
-      <div className="px-6 py-5 border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-4">
+    <section className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl">
+      <div className="px-6 py-5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-white tracking-tight">My Watchlist</h2>
-          <p className="text-xs text-slate-400 mt-0.5">
+          <h2 className="text-base font-semibold text-slate-900 dark:text-white tracking-tight">My Watchlist</h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             Track only your chosen scripts · Click any instrument to launch its live chart
           </p>
         </div>
@@ -289,7 +290,7 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
               type="button"
               onClick={() => void fetchSelectedQuotes(watchlistIds, { silent: false })}
               disabled={loading}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
               Refresh
@@ -307,23 +308,23 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
             </button>
 
             {pickerOpen && (
-              <div className="absolute right-0 mt-2 w-80 bg-[#0C0F14] border border-white/[0.12] rounded-xl shadow-2xl z-30 overflow-hidden">
-                <div className="p-2.5 border-b border-white/[0.08] flex items-center gap-2">
-                  <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <div className="absolute right-0 mt-2 w-80 bg-white dark:bg-[#0B1424] border border-slate-300 dark:border-slate-700 rounded-xl shadow-2xl z-30 overflow-hidden">
+                <div className="p-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center gap-2">
+                  <Search className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 shrink-0" />
                   <input
                     type="text"
                     autoFocus
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     placeholder="Search NIFTY, XAUUSD, BTC, Crude..."
-                    className="w-full bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none"
+                    className="w-full bg-transparent text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none"
                   />
                   {searchQuery && (
                     <button
                       type="button"
                       onClick={() => setSearchQuery('')}
                       aria-label="Clear search"
-                      className="text-slate-500 hover:text-slate-300"
+                      className="text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
@@ -343,17 +344,17 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
                         key={inst.id}
                         type="button"
                         onClick={() => handleAddScript(inst.id)}
-                        className="w-full px-3.5 py-2.5 text-left hover:bg-white/[0.04] transition-colors flex items-center justify-between gap-3"
+                        className="w-full px-3.5 py-2.5 text-left hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors flex items-center justify-between gap-3"
                       >
                         <div className="min-w-0">
-                          <div className="text-xs font-semibold text-white truncate">
+                          <div className="text-xs font-semibold text-slate-900 dark:text-white truncate">
                             {inst.symbol}
                           </div>
-                          <div className="text-[11px] text-slate-400 truncate">
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
                             {inst.name} · {inst.exchangeLabel}
                           </div>
                         </div>
-                        <span className="text-[11px] font-medium text-emerald-400 shrink-0">
+                        <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 shrink-0">
                           Add
                         </span>
                       </button>
@@ -368,8 +369,8 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
 
       {watchedInstruments.length === 0 ? (
         <div className="px-6 py-12 text-center space-y-3">
-          <p className="text-sm font-medium text-slate-200">Your personal watchlist is empty</p>
-          <p className="text-xs text-slate-400 max-w-md mx-auto">
+          <p className="text-sm font-medium text-slate-800 dark:text-slate-200">Your personal watchlist is empty</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
             Add only the scripts you want to follow—such as NIFTY 50, XAUUSD, Crude Oil, or BTCUSDT—using the Add Script button above.
           </p>
         </div>
@@ -377,39 +378,45 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="border-b border-white/[0.06] text-[11px] text-slate-400">
+              <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
                 <th className="py-3 px-6 font-medium">Instrument</th>
                 <th className="py-3 px-4 font-medium">Exchange</th>
+                <th className="py-3 px-4 font-medium hidden md:table-cell">Session Curve</th>
                 <th className="py-3 px-4 font-medium text-right">Live Price</th>
                 <th className="py-3 px-4 font-medium text-right">Change %</th>
                 <th className="py-3 px-4 font-medium">15m Trend</th>
                 <th className="py-3 px-6 font-medium text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.06] text-xs">
+            <tbody className="divide-y divide-slate-200 dark:divide-slate-800 text-xs">
               {watchedInstruments.map((inst) => {
                 const q = quotes[inst.id];
                 const pos = (q?.changePercent ?? 0) >= 0;
                 const tickDir = tickDirections[inst.id];
+                const sparkValues = q?.candles ? q.candles.slice(-24).map((c) => c.close) : [];
 
                 return (
-                  <tr key={inst.id} className="hover:bg-white/[0.025] transition-colors">
+                  <tr key={inst.id} className="hover:bg-slate-50 dark:hover:bg-white/[0.03] transition-colors">
                     <td className="py-3.5 px-6">
-                      <div className="font-semibold text-white">{inst.symbol}</div>
-                      <div className="text-[11px] text-slate-400">{inst.name}</div>
+                      <div className="font-semibold text-slate-900 dark:text-white">{inst.symbol}</div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">{inst.name}</div>
                     </td>
 
-                    <td className="py-3.5 px-4 text-slate-400">{inst.exchangeLabel}</td>
+                    <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400">{inst.exchangeLabel}</td>
+
+                    <td className="py-3.5 px-4 hidden md:table-cell">
+                      <Sparkline values={sparkValues} positive={pos} width={84} height={24} />
+                    </td>
 
                     <td
                       className={`py-3.5 px-4 text-right font-mono-tabular font-semibold transition-colors ${
                         !q?.available
-                          ? 'text-slate-300'
+                          ? 'text-slate-700 dark:text-slate-300'
                           : tickDir === 'UP'
-                            ? 'text-emerald-300'
+                            ? 'text-emerald-700 dark:text-emerald-300'
                             : tickDir === 'DOWN'
-                              ? 'text-red-300'
-                              : 'text-white'
+                              ? 'text-rose-700 dark:text-rose-300'
+                              : 'text-slate-900 dark:text-white'
                       }`}
                     >
                       {loading && !q ? (
@@ -426,8 +433,8 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
                         !q?.available
                           ? 'text-slate-500'
                           : pos
-                            ? 'text-emerald-400'
-                            : 'text-red-400'
+                            ? 'text-emerald-700 dark:text-emerald-400'
+                            : 'text-rose-700 dark:text-rose-400'
                       }`}
                     >
                       {q?.available && q.changePercent !== undefined
@@ -440,10 +447,10 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
                         <span
                           className={`font-medium ${
                             q.technicals.trendBias === 'BULLISH'
-                              ? 'text-emerald-400'
+                              ? 'text-emerald-700 dark:text-emerald-400'
                               : q.technicals.trendBias === 'BEARISH'
-                                ? 'text-red-400'
-                                : 'text-amber-300'
+                                ? 'text-rose-700 dark:text-rose-400'
+                                : 'text-amber-700 dark:text-amber-300'
                           }`}
                         >
                           {q.technicals.trendBias}
@@ -458,7 +465,7 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
                         <button
                           type="button"
                           onClick={() => onOpenInTerminal(inst.id)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#090B0E] hover:bg-slate-800 border border-white/[0.08] text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
                         >
                           Open Chart
                           <ArrowUpRight className="w-3.5 h-3.5" />
@@ -468,7 +475,7 @@ export const DashboardWatchlistSection: React.FC<DashboardWatchlistSectionProps>
                           onClick={() => handleRemoveScript(inst.id)}
                           aria-label={`Remove ${inst.symbol} from watchlist`}
                           title="Remove from watchlist"
-                          className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-white/[0.04] rounded-lg transition-colors"
+                          className="p-1.5 text-slate-500 hover:text-rose-700 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-white/[0.06] rounded-lg transition-colors"
                         >
                           <X className="w-3.5 h-3.5" />
                         </button>
