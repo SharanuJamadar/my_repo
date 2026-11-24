@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Bell, BellRing, Plus, Trash2 } from 'lucide-react';
 import { INSTRUMENTS, type PriceAlertRule } from '../types/trading';
 
@@ -24,6 +24,10 @@ export const PriceAlertsPanel: React.FC<Props> = ({
   const [targetPrice, setTargetPrice] = useState('');
   const [note, setNote] = useState('');
   const [sendTelegram, setSendTelegram] = useState(false);
+
+  useEffect(() => {
+    setInstrumentId(defaultInstrumentId);
+  }, [defaultInstrumentId]);
 
   const selectedInst = INSTRUMENTS.find((i) => i.id === instrumentId) ?? INSTRUMENTS[0];
   const currentPx = livePricesByInstrument[selectedInst.id];

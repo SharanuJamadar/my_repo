@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowUpRight, Pause, Play, RefreshCw } from 'lucide-react';
+import { ArrowUpRight, Pause, Play, RefreshCw, Search } from 'lucide-react';
 import {
   INSTRUMENTS,
   type MarketQuoteResponse,
@@ -16,6 +16,8 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
   onSelectInstrument,
 }) => {
   const [segment, setSegment] = useState<'ALL' | MarketSegment>('ALL');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [trendFilter, setTrendFilter] = useState<'ALL' | 'BULLISH' | 'BEARISH'>('ALL');
   const [quotes, setQuotes] = useState<Record<string, MarketQuoteResponse>>({});
   const [tickDirections, setTickDirections] = useState<Record<string, 'UP' | 'DOWN' | null>>({});
   const [loading, setLoading] = useState(false);
@@ -309,8 +311,59 @@ export const WatchlistView: React.FC<WatchlistViewProps> = ({
         </div>
       </div>
 
+      {/* Search & Trend Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2.5">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter 32 markets by symbol, name, or exchange..."
+            className="w-full pl-8 pr-3 py-1.5 text-xs bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:border-emerald-500"
+          />
+        </div>
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-[11px] text-slate-500 dark:text-slate-400">15m Trend:</span>
+          {(['ALL', 'BULLISH', 'BEARISH'] as const).map((tf) => (
+            <button
+              key={tf}
+              type="button"
+              onClick={() => setTrendFilter(tf)}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                trendFilter === tf
+                  ? tf === 'BULLISH'
+                    ? 'bg-emerald-600 border-emerald-600 text-white'
+                    : tf === 'BEARISH'
+                      ? 'bg-rose-600 border-rose-600 text-white'
+                      : 'bg-blue-700 dark:bg-slate-800 border-blue-700 dark:border-slate-700 text-white'
+                  : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {tf === 'ALL' ? 'All' : tf === 'BULLISH' ? 'Bullish' : 'Bearish'}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {visibleSections.map((sec) => {
-        const items = INSTRUMENTS.filter((i) => i.segment === sec.seg);
+        const qNorm = searchQuery.trim().toLowerCase();
+        const items = INSTRUMENTS.filter((i) => {
+          if (i.segment !== sec.seg) return false;
+          if (qNorm) {
+            const matched =
+              i.symbol.toLowerCase().includes(qNorm) ||
+              i.name.toLowerCase().includes(qNorm) ||
+              i.exchangeLabel.toLowerCase().includes(qNorm);
+            if (!matched) return false;
+          }
+          if (trendFilter !== 'ALL') {
+            const bias = quotes[i.id]?.technicals?.trendBias;
+            if (bias !== trendFilter) return false;
+          }
+          return true;
+        });
+        if (items.length === 0) return null;
         return (
           <div
             key={sec.seg}

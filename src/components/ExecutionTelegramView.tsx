@@ -127,7 +127,7 @@ export const ExecutionTelegramView: React.FC<ExecutionTelegramViewProps> = ({
           <div>
             <div className="font-semibold">Emergency Kill Switch ACTIVE</div>
             <div className="text-rose-700 dark:text-rose-300/90">
-              All paper and live order placements are halted. Disable Kill Switch in Admin Settings to resume execution.
+              All paper and live order placements are halted. Disable Kill Switch in Account Settings to resume execution.
             </div>
           </div>
         </div>

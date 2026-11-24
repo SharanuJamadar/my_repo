@@ -13,31 +13,6 @@ import {
 import { TradingChart } from './TradingChart';
 import { SignalCard } from './SignalCard';
 
-const QUICK_INDIAN_IDS = [
-  'NIFTY50',
-  'BANKNIFTY',
-  'FINNIFTY',
-  'SENSEX',
-  'RELIANCE',
-  'HDFCBANK',
-  'SBIN',
-  'INFY',
-  'TCS',
-];
-const QUICK_INTL_IDS = [
-  'XAUUSD',
-  'XAGUSD',
-  'MCX_CRUDEOIL',
-  'USOIL',
-  'NAS100',
-  'SPX500',
-  'EURUSD',
-  'GBPUSD',
-  'BTCUSDT',
-  'ETHUSDT',
-  'SOLUSDT',
-];
-
 interface TerminalViewProps {
   selectedInstrumentId: string;
   onSelectInstrument: (id: string) => void;
@@ -309,54 +284,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Fast Market Switch Buttons */}
-        <div className="space-y-2 pt-2.5 border-t border-slate-200 dark:border-slate-800">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 mr-1 min-w-[116px]">Indian Most Traded:</span>
-            {QUICK_INDIAN_IDS.map((id) => {
-              const inst = INSTRUMENTS.find((x) => x.id === id);
-              if (!inst) return null;
-              const active = selectedInstrumentId === inst.id;
-              return (
-                <button
-                  key={inst.id}
-                  type="button"
-                  onClick={() => onSelectInstrument(inst.id)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950 font-semibold'
-                      : 'bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  {inst.symbol}
-                </button>
-              );
-            })}
-          </div>
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[11px] text-slate-500 dark:text-slate-400 mr-1 min-w-[116px]">International &amp; MCX:</span>
-            {QUICK_INTL_IDS.map((id) => {
-              const inst = INSTRUMENTS.find((x) => x.id === id);
-              if (!inst) return null;
-              const active = selectedInstrumentId === inst.id;
-              return (
-                <button
-                  key={inst.id}
-                  type="button"
-                  onClick={() => onSelectInstrument(inst.id)}
-                  className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                    active
-                      ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950 font-semibold'
-                      : 'bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white'
-                  }`}
-                >
-                  {inst.symbol}
-                </button>
-              );
-            })}
-          </div>
-        </div>
       </div>
 
       {liveAnalysisError && (
@@ -366,9 +293,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       )}
 
       {/* Main Candlestick Chart(s) + Live Technical Matrix */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-stretch">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-stretch">
         {splitChartMode ? (
-          <div className="xl:col-span-12 grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="xl:col-span-12 grid grid-cols-1 lg:grid-cols-2 gap-4 items-stretch">
             <TradingChart
               instrument={selectedInstrument}
               quote={quote}
@@ -387,15 +314,25 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               onQuickPriceAlert={onQuickPriceAlert}
               compact
             />
-            <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2 px-3 py-2 bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl text-xs">
-                <span className="font-semibold text-slate-700 dark:text-slate-200">
-                  Secondary MTF / Correlation Pane
-                </span>
+            <TradingChart
+              instrument={secondaryInstrument}
+              quote={secondaryQuote}
+              loading={secondaryLoading}
+              timeframe={secondaryTimeframe}
+              onTimeframeChange={setSecondaryTimeframe}
+              onRefresh={() => void fetchSecondaryQuote(false)}
+              liveStreaming={liveStreaming}
+              onToggleLiveStreaming={onToggleLiveStreaming}
+              config={config}
+              openTrades={openTrades}
+              tradeProtectionMap={tradeProtectionMap}
+              onQuickPriceAlert={onQuickPriceAlert}
+              headerAccessory={
                 <select
                   value={secondaryInstrumentId}
                   onChange={(e) => setSecondaryInstrumentId(e.target.value)}
-                  className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-md px-2 py-1 text-xs font-semibold text-slate-900 dark:text-white"
+                  aria-label="Secondary chart instrument"
+                  className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
                 >
                   {INSTRUMENTS.map((inst) => (
                     <option key={inst.id} value={inst.id}>
@@ -403,25 +340,52 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                     </option>
                   ))}
                 </select>
-              </div>
-              <TradingChart
-                instrument={secondaryInstrument}
-                quote={secondaryQuote}
-                loading={secondaryLoading}
-                timeframe={secondaryTimeframe}
-                onTimeframeChange={setSecondaryTimeframe}
-                onRefresh={() => void fetchSecondaryQuote(false)}
-                liveStreaming={liveStreaming}
-                onToggleLiveStreaming={onToggleLiveStreaming}
-                config={config}
-                openTrades={openTrades}
-                tradeProtectionMap={tradeProtectionMap}
-                compact
-              />
-            </div>
+              }
+              secondaryStrip={
+                <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0E182A] flex flex-wrap items-center justify-between gap-2.5 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      MTF Correlation Pane
+                    </span>
+                    <span className="text-slate-400">·</span>
+                    <span className="font-mono-tabular text-slate-600 dark:text-slate-300">
+                      {secondaryQuote?.technicals?.trendBias
+                        ? `Bias: ${secondaryQuote.technicals.trendBias}`
+                        : 'Syncing HTF structure'}
+                    </span>
+                    {typeof secondaryQuote?.technicals?.rsi === 'number' && (
+                      <>
+                        <span className="text-slate-400">·</span>
+                        <span className="font-mono-tabular text-slate-600 dark:text-slate-300">
+                          RSI {secondaryQuote.technicals.rsi}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Pair / Index
+                    </span>
+                    <select
+                      value={secondaryInstrumentId}
+                      onChange={(e) => setSecondaryInstrumentId(e.target.value)}
+                      aria-label="Select secondary MTF market"
+                      className="bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-700 rounded-md px-2 py-1 text-xs font-semibold text-slate-900 dark:text-white focus:outline-none focus:border-emerald-500"
+                    >
+                      {INSTRUMENTS.map((inst) => (
+                        <option key={inst.id} value={inst.id}>
+                          {inst.symbol}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              }
+              compact
+            />
           </div>
         ) : (
-          <div className="xl:col-span-8">
+          <div className="xl:col-span-9">
             <TradingChart
               instrument={selectedInstrument}
               quote={quote}
@@ -444,7 +408,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
         <div
           className={`${
-            splitChartMode ? 'xl:col-span-12' : 'xl:col-span-4'
+            splitChartMode ? 'xl:col-span-12' : 'xl:col-span-3'
           } bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-4`}
         >
           <div className="space-y-4">

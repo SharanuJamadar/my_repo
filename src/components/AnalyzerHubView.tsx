@@ -3,7 +3,6 @@ import {
   Activity,
   Bot,
   Code2,
-  MessageSquare,
   Play,
   RefreshCw,
   ScanSearch,
@@ -27,7 +26,6 @@ import type {
 import type { AutoScanMarketItem } from './DashboardView';
 import { WatchlistView } from './WatchlistView';
 import { ChartAnalysisBotView } from './ChartAnalysisBotView';
-import { ChatbotView } from './ChatbotView';
 import { PineStrategyBotView } from './PineStrategyBotView';
 import { ExecutionTelegramView } from './ExecutionTelegramView';
 
@@ -35,7 +33,6 @@ export type AnalyzerSubTab =
   | 'auto-analyzer'
   | 'screener'
   | 'chart-ai'
-  | 'ai-assistant'
   | 'pine-bot'
   | 'signals-orders';
 
@@ -114,7 +111,6 @@ const SUB_TABS: {
   { id: 'auto-analyzer', label: 'Trade Auto-Analyzer', icon: Bot },
   { id: 'screener', label: 'Scripts Screener (32)', icon: Activity },
   { id: 'chart-ai', label: 'Chart Upload AI', icon: ScanSearch },
-  { id: 'ai-assistant', label: 'AI Assistant', icon: MessageSquare },
   { id: 'pine-bot', label: 'Pine Strategy & Bot', icon: Code2 },
   { id: 'signals-orders', label: 'Telegram & Orders', icon: Send },
 ];
@@ -131,7 +127,6 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
   signals,
   orders,
   telegramLogs,
-  chatMessages,
   pineStrategies,
   pineBotLogs,
   integrationStatus,
@@ -150,10 +145,6 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
   onDispatchTelegram,
   onLogPaperTrade,
   onOpenOrderModal,
-  onUpdateInstrumentSelection,
-  onSendUserMessage,
-  onSaveAssistantMessage,
-  onClearChatHistory,
   onSavePineStrategy,
   onDeletePineStrategy,
   onTogglePineBot,
@@ -290,7 +281,7 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
           {config.killSwitchActive && (
             <div className="px-4 py-2 bg-rose-50 dark:bg-rose-500/10 border-b border-rose-200 dark:border-rose-500/35 flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
               <ShieldAlert className="w-4 h-4 shrink-0" />
-              Emergency Kill Switch is ACTIVE — automated execution is paused until switched off in Admin Settings.
+              Emergency Kill Switch is ACTIVE — automated execution is paused until switched off in Account Settings.
             </div>
           )}
 
@@ -507,20 +498,7 @@ export const AnalyzerHubView: React.FC<AnalyzerHubViewProps> = ({
         />
       )}
 
-      {/* Sub-Tab 4: AI Assistant */}
-      {activeSubTab === 'ai-assistant' && (
-        <ChatbotView
-          messages={chatMessages}
-          config={config}
-          selectedInstrumentId={selectedInstrumentId}
-          onInstrumentChange={onUpdateInstrumentSelection}
-          onSendUserMessage={onSendUserMessage}
-          onSaveAssistantMessage={onSaveAssistantMessage}
-          onClearHistory={onClearChatHistory}
-        />
-      )}
-
-      {/* Sub-Tab 5: Pine Strategy & Bot */}
+      {/* Sub-Tab 4: Pine Strategy & Bot */}
       {activeSubTab === 'pine-bot' && (
         <PineStrategyBotView
           strategies={pineStrategies}

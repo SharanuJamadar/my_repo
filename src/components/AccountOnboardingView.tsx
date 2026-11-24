@@ -11,7 +11,12 @@ import {
   User,
   UserPlus,
 } from 'lucide-react';
-import { BROKER_APPS } from '../lib/brokers';
+import {
+  BROKER_APPS,
+  BROKER_CATEGORY_LABELS,
+  type BrokerCategory,
+} from '../lib/brokers';
+import { authFetch } from '../lib/authFetch';
 import {
   INSTRUMENTS,
   type AccountProfileSettings,
@@ -64,15 +69,52 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
   const [error, setError] = useState<string | null>(null);
 
   // Trading App state
+  const [brokerCategory, setBrokerCategory] = useState<'ALL' | BrokerCategory>('ALL');
   const [selectedBrokerId, setSelectedBrokerId] = useState<string>(() => {
     const matched = REAL_BROKERS.find(
       (b) =>
         currentBrokerLabel.toLowerCase().includes(b.id.toLowerCase()) ||
         currentBrokerLabel.toLowerCase().includes(b.name.toLowerCase())
     );
-    return matched?.id ?? 'EXNESS';
+    return matched?.id ?? 'ZERODHA';
   });
   const [brokerAlias, setBrokerAlias] = useState('');
+  const [redirectNote, setRedirectNote] = useState<string | null>(null);
+
+  const visibleBrokers =
+    brokerCategory === 'ALL'
+      ? REAL_BROKERS
+      : REAL_BROKERS.filter((b) => b.category === brokerCategory);
+
+  const handleLaunchBrokerRedirect = async () => {
+    setError(null);
+    setRedirectNote(null);
+    try {
+      const res = await authFetch(`/api/brokers/oauth/url/${encodeURIComponent(selectedBrokerId)}`);
+      const data = await res.json();
+      const targetUrl: string = data?.oauthConfigured ? data.authUrl : selectedBroker.portalUrl;
+      if (!targetUrl || !/^https:\/\//i.test(targetUrl)) {
+        setError('Unable to resolve redirect URL for this trading app.');
+        return;
+      }
+      const win = window.open(
+        targetUrl,
+        `mytrade_onboard_${selectedBrokerId}`,
+        'width=640,height=760'
+      );
+      if (!win) {
+        setError('Popup blocked by browser. Allow popups or use the Open Portal link.');
+        return;
+      }
+      setRedirectNote(
+        data?.oauthConfigured
+          ? `Redirected to ${selectedBroker.name} OAuth login. Complete sign-in in the popup to connect automatically.`
+          : `Opened ${selectedBroker.name}. After logging in, click Connect below to bind your desk.`
+      );
+    } catch {
+      setError('Could not launch trading app redirect.');
+    }
+  };
 
   // Demo Account registration state (do NOT pre-show any wallet)
   const [fullName, setFullName] = useState(
@@ -180,7 +222,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
         <button
           type="button"
           onClick={onBackToLanding}
-          className="font-classic-serif text-xl font-semibold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
+          className="font-landing-display text-xl font-bold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
         >
           My Trade
         </button>
@@ -219,7 +261,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
         <div className="w-full max-w-4xl space-y-8">
           <div className="space-y-2 text-center max-w-2xl mx-auto">
             <div className="text-xs font-medium text-blue-700 dark:text-sky-400">Account Access Setup</div>
-            <h1 className="font-classic-serif text-3xl sm:text-4xl font-semibold text-slate-900 dark:text-white tracking-tight text-balance">
+            <h1 className="font-landing-display text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white tracking-[-0.025em] text-balance">
               Choose how you would like to trade with My Trade
             </h1>
             <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -267,7 +309,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
               }}
               className={`p-6 rounded-xl border text-left transition-all flex flex-col justify-between gap-5 ${
                 selectedPath === 'DEMO'
-                  ? 'bg-blue-700 dark:bg-sky-500/[0.09] border-blue-500 dark:border-sky-400'
+                  ? 'bg-blue-50 dark:bg-sky-500/[0.09] border-blue-500 dark:border-sky-400'
                   : 'bg-white dark:bg-[#0E182A] border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700'
               }`}
             >
@@ -297,33 +339,52 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
             >
               <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 dark:border-slate-800 pb-4">
                 <div>
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">Select Your Trading App</h3>
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">Select Your Trading App ({REAL_BROKERS.length} Supported)</h3>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Pick a broker platform below to bind your execution profile.
+                    Redirect to your trading app to connect or bind your execution profile.
                   </p>
                 </div>
-                {selectedBroker.portalUrl && (
-                  <a
-                    href={selectedBroker.portalUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-blue-700 dark:text-sky-300 rounded-lg whitespace-nowrap"
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleLaunchBrokerRedirect}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-700 hover:bg-blue-600 dark:bg-sky-500 dark:hover:bg-sky-400 text-white dark:text-slate-950 rounded-lg whitespace-nowrap"
                   >
-                    Open {selectedBroker.name} Portal
+                    Redirect &amp; Connect {selectedBroker.name}
                     <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
+                  </button>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-                {REAL_BROKERS.map((app) => {
+              <div className="flex flex-wrap items-center gap-1.5">
+                {(['ALL', 'INDIAN', 'FOREX', 'GLOBAL', 'CRYPTO', 'CHARTING'] as const).map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setBrokerCategory(cat)}
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition-colors ${
+                      brokerCategory === cat
+                        ? 'bg-blue-700 dark:bg-sky-500 border-blue-700 dark:border-sky-500 text-white dark:text-slate-950'
+                        : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-300'
+                    }`}
+                  >
+                    {BROKER_CATEGORY_LABELS[cat]}
+                  </button>
+                ))}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-56 overflow-y-auto pr-0.5">
+                {visibleBrokers.map((app) => {
                   const active = app.id === selectedBrokerId;
                   const liveReady = Boolean(brokerReadiness[app.id]);
                   return (
                     <button
                       key={app.id}
                       type="button"
-                      onClick={() => setSelectedBrokerId(app.id)}
+                      onClick={() => {
+                        setSelectedBrokerId(app.id);
+                        setRedirectNote(null);
+                      }}
                       className={`p-3.5 rounded-lg border text-left transition-colors ${
                         active
                           ? 'bg-blue-50 dark:bg-sky-500/10 border-sky-400/50'
@@ -331,13 +392,13 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-slate-900 dark:text-white">{app.name}</span>
+                        <span className="text-xs font-semibold text-slate-900 dark:text-white truncate">{app.name}</span>
                         <span
-                          className={`text-[11px] font-medium ${
+                          className={`text-[11px] font-medium shrink-0 ${
                             liveReady ? 'text-emerald-700 dark:text-emerald-400' : 'text-blue-700 dark:text-sky-300'
                           }`}
                         >
-                          {liveReady ? 'Live Ready' : 'Paper-Linked'}
+                          {liveReady ? 'Live Ready' : app.supportsOAuth ? 'OAuth Redirect' : 'Web Portal'}
                         </span>
                       </div>
                       <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-1 truncate">{app.markets}</div>
@@ -345,6 +406,12 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                   );
                 })}
               </div>
+
+              {redirectNote && (
+                <div className="p-3 rounded-lg bg-blue-50 dark:bg-sky-500/10 border border-blue-200 dark:border-sky-500/35 text-xs text-blue-800 dark:text-sky-300">
+                  {redirectNote}
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                 <div>

@@ -35,6 +35,10 @@ import {
   startPositionMonitorWorker,
   syncMonitoredPositions,
 } from './server/positionMonitorService.ts';
+import {
+  getAllBrokerReadiness,
+  registerBrokerOAuthRoutes,
+} from './server/brokerOAuth.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -408,32 +412,33 @@ function validateExnessBridgeUrl(rawUrl?: string): URL | null {
   }
 }
 
-function getBrokerReadinessMap(): Record<string, boolean> {
+function getBrokerReadinessMap(userId?: string): Record<string, boolean> {
   const validExnessUrl = Boolean(validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL));
+  const combined = getAllBrokerReadiness(userId);
+  const exnessReady = Boolean(validExnessUrl && process.env.EXNESS_API_TOKEN);
   return {
+    ...combined,
     PAPER_ENGINE: true,
-    GROWW: Boolean(process.env.GROWW_API_TOKEN),
-    EXNESS: Boolean(validExnessUrl && process.env.EXNESS_API_TOKEN),
-    UPSTOX: Boolean(process.env.UPSTOX_ACCESS_TOKEN),
-    ZERODHA: Boolean(process.env.KITE_API_KEY && process.env.KITE_ACCESS_TOKEN),
-    DHAN: Boolean(process.env.DHAN_CLIENT_ID && process.env.DHAN_ACCESS_TOKEN),
-    ANGELONE: Boolean(process.env.ANGEL_API_KEY),
-    BINANCE: Boolean(process.env.BINANCE_API_KEY && process.env.BINANCE_API_SECRET),
+    EXNESS: exnessReady,
+    MT5: exnessReady,
   };
 }
 
-function hasAnyLiveBrokerConfigured(): boolean {
+function hasAnyLiveBrokerConfigured(userId?: string): boolean {
   if (process.env.BROKER_API_KEY && process.env.BROKER_API_SECRET) return true;
-  const map = getBrokerReadinessMap();
+  const map = getBrokerReadinessMap(userId);
   return Object.entries(map).some(([k, v]) => k !== 'PAPER_ENGINE' && v);
 }
 
-app.get('/api/brokers/status', (_req: Request, res: Response) => {
+app.get('/api/brokers/status', async (req: Request, res: Response) => {
+  const verifiedUser = await verifyFirebaseRequestUser(req);
   res.json({
-    brokers: getBrokerReadinessMap(),
-    anyLiveBrokerConfigured: hasAnyLiveBrokerConfigured(),
+    brokers: getBrokerReadinessMap(verifiedUser?.uid),
+    anyLiveBrokerConfigured: hasAnyLiveBrokerConfigured(verifiedUser?.uid),
   });
 });
+
+registerBrokerOAuthRoutes(app, verifyFirebaseRequestUser);
 
 app.get('/api/brokers/exness/status', (_req: Request, res: Response) => {
   const parsedUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);

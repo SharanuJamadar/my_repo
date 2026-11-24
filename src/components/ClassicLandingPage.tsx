@@ -15,8 +15,7 @@ import {
   Wallet,
 } from 'lucide-react';
 import type { AccountProfileSettings, MarketQuoteResponse } from '../types/trading';
-import heroSwissDayImg from '../assets/images/hero_swiss_trading_desk_1795425555705.jpg';
-import heroDeskDarkImg from '../assets/images/hero_trading_desk_1794903330673.jpg';
+import heroObsidianDeskImg from '../assets/images/hero_obsidian_desk_1795436083282.jpg';
 import { ExnessGuidePanel } from './ExnessGuidePanel';
 import { Sparkline } from './Sparkline';
 import { useTheme } from '../lib/theme';
@@ -72,6 +71,29 @@ const DESK_GROUPS = [
     title: 'Global FX, Metals & Crypto',
     subtitle: 'Exness MT5 Compatible · 24/7 Streams',
     ids: ['XAUUSD', 'EURUSD', 'NAS100', 'BTCUSDT', 'ETHUSDT'],
+  },
+];
+
+const PROOF_METRICS = [
+  {
+    value: '32 Markets',
+    label: 'NSE, MCX, COMEX, FX & Crypto',
+    detail: 'Live multi-desk quote routing',
+  },
+  {
+    value: '30ms WS',
+    label: 'Sub-Second Tick Ingestion',
+    detail: 'Direct orderbook & candle streams',
+  },
+  {
+    value: '40 / 30 / 30',
+    label: '3-TP Stepped Profit Ladder',
+    detail: 'Automated SL ratchet at TP1 & TP2',
+  },
+  {
+    value: '24/7 Guard',
+    label: 'Server-Side Risk & Trailing',
+    detail: 'Daily drawdown cap + ±15m news shield',
   },
 ];
 
@@ -141,49 +163,90 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
 
   const currentGroup = DESK_GROUPS.find((g) => g.id === activeDesk) ?? DESK_GROUPS[2];
   const tapeIds = ['XAUUSD', 'NIFTY50', 'BTCUSDT', 'MCX_CRUDEOIL', 'NAS100', 'EURUSD'];
+  const goldQuote = quotes['XAUUSD'];
 
   return (
-    <div className="min-h-screen bg-[#F4F6FA] dark:bg-[#08101E] text-slate-900 dark:text-slate-100 flex flex-col selection:bg-blue-700 dark:bg-sky-500/25 selection:text-slate-900 dark:text-white">
-      {/* 1. Clean 3-Zone Sticky Top Navigation (Brand · 4 Nav Links · 1 Primary CTA) */}
-      <header className="h-16 border-b border-slate-200 dark:border-slate-800 bg-white/95 dark:bg-[#08101E]/90 backdrop-blur-md sticky top-0 z-40">
+    <div className="min-h-screen font-landing-body bg-[#F6F4EE] dark:bg-[#07090E] text-stone-900 dark:text-stone-100 flex flex-col selection:bg-emerald-600/20 selection:text-emerald-950 dark:selection:text-emerald-100">
+      {/* 1. Strict 3-Zone Sticky Navigation Bar (Brand · 4 Single-Line Links · 1 Primary CTA) */}
+      <header className="h-16 border-b border-stone-200/90 dark:border-white/[0.08] bg-[#F6F4EE]/92 dark:bg-[#07090E]/90 backdrop-blur-md sticky top-0 z-40">
         <div className="max-w-7xl mx-auto h-full px-6 lg:px-10 flex items-center justify-between gap-8">
           <a
             href="#top"
-            className="font-classic-serif text-xl font-semibold tracking-tight text-slate-900 dark:text-white whitespace-nowrap shrink-0"
+            onClick={(e) => {
+              e.preventDefault();
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="font-landing-display text-xl font-bold tracking-[-0.03em] text-stone-950 dark:text-white whitespace-nowrap shrink-0"
           >
             My Trade
           </a>
 
-          <nav className="hidden md:flex items-center gap-7 text-xs font-medium text-slate-500 dark:text-slate-400">
-            <a href="#capabilities" className="hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0">
+          <nav className="hidden md:flex items-center gap-8 text-xs font-medium text-stone-600 dark:text-stone-400">
+            <a
+              href="#capabilities"
+              onClick={(e) => {
+                e.preventDefault();
+                document.getElementById('capabilities')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hover:text-stone-950 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
+            >
               Auto-Trade
             </a>
-            <a href="#accounts" className="hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0">
+            <a
+              href="#accounts"
+              onClick={(e) => {
+                e.preventDefault();
+                document.getElementById('accounts')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hover:text-stone-950 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
+            >
               Live &amp; Demo
             </a>
-            <a href="#markets" className="hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0">
+            <a
+              href="#markets"
+              onClick={(e) => {
+                e.preventDefault();
+                document.getElementById('markets')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hover:text-stone-950 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
+            >
               Markets
             </a>
-            <a href="#exness-api" className="hover:text-slate-900 dark:hover:text-white transition-colors whitespace-nowrap shrink-0">
+            <a
+              href="#exness-api"
+              onClick={(e) => {
+                e.preventDefault();
+                document.getElementById('exness-api')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="hover:text-stone-950 dark:hover:text-white transition-colors whitespace-nowrap shrink-0"
+            >
               Exness API
             </a>
           </nav>
 
-          <div className="flex items-center gap-4 shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              onClick={onEnterDemoAccount}
+              className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold bg-white dark:bg-[#111622] hover:bg-stone-100 dark:hover:bg-[#171E2E] border border-stone-300 dark:border-white/[0.14] text-stone-900 dark:text-stone-100 rounded-lg transition-colors whitespace-nowrap shrink-0"
+            >
+              <Wallet className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400 shrink-0" />
+              Demo Account
+            </button>
             {isSignedIn ? (
               <button
                 type="button"
-                onClick={activeAccountType === 'LIVE' ? onEnterActualAccount : onEnterDemoAccount}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-700 dark:bg-sky-500 hover:bg-blue-800 dark:hover:bg-sky-400 text-white dark:text-slate-950 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                onClick={onEnterActualAccount}
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-emerald-700 dark:bg-emerald-500 hover:bg-emerald-800 dark:hover:bg-emerald-400 text-white dark:text-stone-950 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
-                Open Workspace
-                <ArrowRight className="w-3.5 h-3.5" />
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                Actual Account
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => onOpenLoginModal('GENERAL')}
-                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-blue-700 dark:bg-white hover:bg-blue-800 dark:hover:bg-slate-100 text-white dark:text-slate-950 rounded-lg transition-colors whitespace-nowrap shrink-0"
+                className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold bg-stone-950 dark:bg-emerald-500 hover:bg-stone-800 dark:hover:bg-emerald-400 text-white dark:text-stone-950 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
                 Sign In
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -197,7 +260,11 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
       {authError && (
         <div className="bg-rose-50 dark:bg-rose-500/10 border-b border-rose-200 dark:border-rose-500/30 px-6 py-2.5 text-xs text-rose-800 dark:text-rose-200 flex items-center justify-between max-w-7xl mx-auto w-full">
           <span>{authError}</span>
-          <button type="button" onClick={onDismissAuthError} className="text-rose-700 dark:text-rose-300 hover:text-slate-900 dark:hover:text-white ml-4">
+          <button
+            type="button"
+            onClick={onDismissAuthError}
+            className="text-rose-700 dark:text-rose-300 hover:text-stone-950 dark:hover:text-white ml-4"
+          >
             Dismiss
           </button>
         </div>
@@ -206,7 +273,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
       {justCompletedMode && (
         <div className="bg-emerald-50 dark:bg-emerald-500/10 border-b border-emerald-200 dark:border-emerald-500/30">
           <div className="max-w-7xl mx-auto px-6 lg:px-10 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex items-center gap-2 text-emerald-800 dark:text-emerald-200">
+            <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200">
               <CheckCircle2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
               <span>
                 {justCompletedMode === 'BROKER'
@@ -218,14 +285,14 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
               <button
                 type="button"
                 onClick={justCompletedMode === 'BROKER' ? onEnterActualAccount : onEnterDemoAccount}
-                className="font-semibold text-slate-900 dark:text-white underline underline-offset-4 hover:text-emerald-700 dark:hover:text-emerald-300"
+                className="font-semibold text-stone-950 dark:text-white underline underline-offset-4 hover:text-emerald-700 dark:hover:text-emerald-300"
               >
                 Enter {justCompletedMode === 'BROKER' ? 'Actual Account' : 'Demo Account'} →
               </button>
               <button
                 type="button"
                 onClick={onDismissCompletedBanner}
-                className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                className="text-stone-600 dark:text-stone-400 hover:text-stone-950 dark:hover:text-white"
               >
                 Dismiss
               </button>
@@ -234,287 +301,408 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
         </div>
       )}
 
-      {/* 2. Live Exchange Tape */}
-      <div className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424]">
-        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-2.5 flex items-center gap-6 overflow-x-auto text-xs font-mono-tabular">
-          {tapeIds.map((id) => {
-            const q = quotes[id];
-            if (!q) return null;
-            const pos = q.changePercent >= 0;
-            return (
-              <div key={id} className="flex items-center gap-2 whitespace-nowrap shrink-0">
-                <span className="text-slate-500 dark:text-slate-400">{q.symbol}</span>
-                <span className="text-slate-900 dark:text-white font-medium">
-                  {q.currency}
-                  {q.price.toLocaleString()}
-                </span>
-                <span className={pos ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}>
-                  {pos ? '+' : ''}
-                  {q.changePercent.toFixed(2)}%
-                </span>
-              </div>
-            );
-          })}
-          {Object.keys(quotes).length === 0 && (
-            <span className="text-slate-500">Connecting live exchange quotes · NSE · MCX · COMEX · Crypto</span>
-          )}
+      {/* 2. Live Institutional Market Tape */}
+      <div className="border-b border-stone-200/80 dark:border-white/[0.07] bg-white/80 dark:bg-[#0B0F17]">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-2.5 flex items-center justify-between gap-6 overflow-x-auto text-xs font-landing-mono">
+          <div className="flex items-center gap-7">
+            {tapeIds.map((id) => {
+              const q = quotes[id];
+              if (!q) return null;
+              const pos = q.changePercent >= 0;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => onEnterTerminal(id)}
+                  className="flex items-center gap-2 whitespace-nowrap shrink-0 hover:opacity-80 transition-opacity"
+                >
+                  <span className="text-stone-500 dark:text-stone-400">{q.symbol}</span>
+                  <span className="text-stone-950 dark:text-white font-semibold">
+                    {q.currency}
+                    {q.price.toLocaleString()}
+                  </span>
+                  <span
+                    className={
+                      pos
+                        ? 'text-emerald-700 dark:text-emerald-400'
+                        : 'text-rose-700 dark:text-rose-400'
+                    }
+                  >
+                    {pos ? '+' : ''}
+                    {q.changePercent.toFixed(2)}%
+                  </span>
+                </button>
+              );
+            })}
+            {Object.keys(quotes).length === 0 && (
+              <span className="text-stone-500 dark:text-stone-400">
+                Connecting verified exchange feeds · NSE · MCX · COMEX · FX · Crypto
+              </span>
+            )}
+          </div>
+          <span className="hidden xl:inline text-[11px] text-stone-400 dark:text-stone-500 whitespace-nowrap shrink-0">
+            Click any quote to launch chart
+          </span>
         </div>
       </div>
 
-      {/* 3. Hero Section — Clear Editorial Hierarchy & Direct Actual vs Demo Path */}
-      <section id="top" className="relative overflow-hidden border-b border-slate-200 dark:border-slate-800">
-        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-16 lg:py-24 grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-          <div className="lg:col-span-6 space-y-6">
-            <div className="text-xs font-medium uppercase tracking-[0.18em] text-blue-700 dark:text-sky-400">
-              Multi-Asset Execution Terminal · 3-TP Stepped Trailing
-            </div>
+      {/* 3. Architectural Editorial Hero Section (Obsidian Carbon + Ambient Illumination + Fine Grid) */}
+      <section
+        id="top"
+        className="relative overflow-hidden border-b border-stone-200/90 dark:border-white/[0.08] landing-arch-grid"
+      >
+        <div className="landing-hero-glow">
+          <div className="max-w-7xl mx-auto px-6 lg:px-10 pt-14 pb-12 lg:pt-20 lg:pb-16 grid grid-cols-1 lg:grid-cols-12 gap-12 items-stretch">
+            {/* Left Editorial Proposition */}
+            <div className="lg:col-span-6 flex flex-col justify-between space-y-8">
+              <div className="space-y-6">
+                <div className="text-xs font-semibold uppercase tracking-[0.2em] text-emerald-800 dark:text-emerald-400">
+                  Institutional Execution Desk · 3-TP Stepped Trailing
+                </div>
 
-            <h1 className="font-classic-serif text-4xl sm:text-5xl lg:text-[3.35rem] font-semibold text-slate-900 dark:text-white tracking-tight leading-[1.08] text-balance">
-              Precision automated trading with strict live &amp; demo isolation.
-            </h1>
+                <h1 className="font-landing-display tracking-[-0.025em] text-4xl sm:text-5xl lg:text-[3.55rem] font-semibold text-stone-950 dark:text-white tracking-tight leading-[1.06] text-balance">
+                  Disciplined multi-asset execution with isolated live &amp; demo accounts.
+                </h1>
 
-            <p className="text-sm sm:text-base text-slate-500 dark:text-slate-400 leading-relaxed max-w-xl">
-              Execute multi-timeframe strategies and Pine Script v5 bots across XAUUSD, NIFTY 50, MCX Crude Oil, and Crypto — with automatic 3-target profit ladders that trail your Stop Loss at every TP milestone.
-            </p>
+                <p className="text-sm sm:text-base text-stone-600 dark:text-stone-300 leading-relaxed max-w-xl">
+                  Trade XAUUSD, NIFTY 50, MCX Crude Oil, and Crypto on a full-bleed charting workspace with interactive Trendlines, Fibonacci retracements, Pine Script v5 automation, and automatic 3-target profit booking that ratchets your Stop Loss at every milestone.
+                </p>
 
-            {/* Clear Dual Action Pair: Actual Account vs Demo Account */}
-            <div className="flex flex-wrap items-center gap-3 pt-2">
-              <button
-                type="button"
-                onClick={onEnterActualAccount}
-                className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold bg-blue-700 dark:bg-sky-500 hover:bg-blue-800 dark:hover:bg-sky-400 text-white dark:text-slate-950 rounded-lg transition-colors whitespace-nowrap"
-              >
-                <ShieldCheck className="w-4 h-4 shrink-0" />
-                {isSignedIn ? 'Open Actual Account (Live)' : 'Sign In — Actual Account'}
-              </button>
-
-              <button
-                type="button"
-                onClick={onEnterDemoAccount}
-                className="inline-flex items-center gap-2 px-5 py-3 text-sm font-semibold bg-white dark:bg-[#132038] hover:bg-slate-50 dark:hover:bg-[#1A2A47] border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white rounded-lg transition-colors whitespace-nowrap"
-              >
-                <Wallet className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
-                Launch Demo Account
-              </button>
-            </div>
-
-            {/* Quiet Account Status Line (Zero Pills) */}
-            <div className="pt-4 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-slate-500 dark:text-slate-400">
-              {isSignedIn ? (
-                <>
-                  <span>
-                    Signed in: <strong className="text-slate-800 dark:text-slate-200 font-medium">{userEmail}</strong>
-                  </span>
-                  <span>·</span>
+                {/* Primary & Secondary Action Pair */}
+                <div className="flex flex-wrap items-center gap-3.5 pt-1">
                   <button
                     type="button"
-                    onClick={onStartOnboarding}
-                    className="text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white underline underline-offset-4"
+                    onClick={onEnterActualAccount}
+                    className="inline-flex items-center gap-2.5 px-6 py-3.5 text-sm font-semibold bg-emerald-700 dark:bg-emerald-500 hover:bg-emerald-800 dark:hover:bg-emerald-400 text-white dark:text-stone-950 rounded-xl transition-colors whitespace-nowrap"
                   >
-                    Configure Account
+                    <ShieldCheck className="w-4 h-4 shrink-0" />
+                    {isSignedIn ? 'Open Actual Account (Live)' : 'Sign In — Actual Account'}
                   </button>
-                  <span>·</span>
+
                   <button
                     type="button"
-                    onClick={() => void onSignOut()}
-                    className="text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white"
+                    onClick={onEnterDemoAccount}
+                    className="inline-flex items-center gap-2.5 px-6 py-3.5 text-sm font-semibold bg-white dark:bg-[#111622] hover:bg-stone-100 dark:hover:bg-[#171E2E] border border-stone-300 dark:border-white/[0.14] text-stone-950 dark:text-white rounded-xl transition-colors whitespace-nowrap"
                   >
-                    Sign Out
+                    <Wallet className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                    Launch Demo Account
                   </button>
-                </>
-              ) : (
-                <>
-                  <span>Google Firebase Auth</span>
-                  <span>·</span>
-                  <span>Zero Broker Keys in Browser</span>
-                  <span>·</span>
-                  <span>Exness MT5 Bridge Ready</span>
-                </>
-              )}
+                </div>
+              </div>
+
+              {/* Quiet Editorial Credentials / Auth Status Line */}
+              <div className="pt-5 border-t border-stone-300/70 dark:border-white/[0.08] flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-stone-600 dark:text-stone-400">
+                {isSignedIn ? (
+                  <>
+                    <span>
+                      Active session:{' '}
+                      <strong className="text-stone-950 dark:text-white font-medium">{userEmail}</strong>
+                    </span>
+                    <span className="text-stone-400 dark:text-stone-600">·</span>
+                    <button
+                      type="button"
+                      onClick={onStartOnboarding}
+                      className="text-emerald-800 dark:text-emerald-400 hover:underline underline-offset-4 font-medium"
+                    >
+                      Account Setup
+                    </button>
+                    <span className="text-stone-400 dark:text-stone-600">·</span>
+                    <button
+                      type="button"
+                      onClick={() => void onSignOut()}
+                      className="hover:text-stone-950 dark:hover:text-white transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span>Firebase Auth Protected</span>
+                    <span className="text-stone-400 dark:text-stone-600">·</span>
+                    <span>Server-Side Broker Signing</span>
+                    <span className="text-stone-400 dark:text-stone-600">·</span>
+                    <span>Exness MT5 Bridge Ready</span>
+                  </>
+                )}
+              </div>
+            </div>
+
+            {/* Right Architectural Visual & Live 3-TP Ladder Showcase */}
+            <div className="lg:col-span-6 flex flex-col">
+              <div className="bg-[#0D1119] border border-stone-800/80 dark:border-white/[0.11] rounded-2xl overflow-hidden shadow-2xl flex flex-col flex-1">
+                <div className="relative h-64 sm:h-80 bg-[#0A0E16]">
+                  {!heroImgError ? (
+                    <img
+                      src={heroObsidianDeskImg}
+                      alt="My Trade obsidian architectural trading desk"
+                      referrerPolicy="no-referrer"
+                      onError={() => setHeroImgError(true)}
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    <div className="w-full h-full bg-gradient-to-br from-[#0F1722] via-[#0A0E16] to-[#06090F]" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-[#0D1119] via-[#0D1119]/35 to-transparent" />
+                  <div className="absolute bottom-4 left-5 right-5 flex items-end justify-between gap-4">
+                    <div>
+                      <div className="text-[11px] uppercase tracking-[0.16em] text-amber-300 font-medium">
+                        {goldQuote
+                          ? `XAUUSD LIVE · $${goldQuote.price.toLocaleString()} (${goldQuote.changePercent >= 0 ? '+' : ''}${goldQuote.changePercent.toFixed(2)}%)`
+                          : 'Automated Protection Architecture'}
+                      </div>
+                      <div className="font-landing-display tracking-[-0.025em] text-xl sm:text-2xl font-semibold text-white mt-0.5">
+                        3-TP Stepped Trailing &amp; Fibonacci Charting
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onEnterTerminal()}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 backdrop-blur-sm border border-white/15 text-xs font-medium text-white transition-colors whitespace-nowrap shrink-0"
+                    >
+                      Open Terminal
+                      <ArrowUpRight className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Crisp 3-Step Protection Readout */}
+                <div className="p-5 sm:p-6 grid grid-cols-3 divide-x divide-white/[0.08] text-xs font-landing-mono bg-[#0D1119]">
+                  <div className="pr-4 space-y-1">
+                    <div className="text-[11px] text-stone-400 font-sans">Stage 01 · TP1 Hit</div>
+                    <div className="text-sm font-semibold text-emerald-400">SL → Entry</div>
+                    <div className="text-[11px] text-stone-500 font-sans">40% booked · Risk zero</div>
+                  </div>
+                  <div className="px-4 space-y-1">
+                    <div className="text-[11px] text-stone-400 font-sans">Stage 02 · TP2 Hit</div>
+                    <div className="text-sm font-semibold text-amber-400">SL → TP1</div>
+                    <div className="text-[11px] text-stone-500 font-sans">30% booked · Gain locked</div>
+                  </div>
+                  <div className="pl-4 space-y-1">
+                    <div className="text-[11px] text-stone-400 font-sans">Stage 03 · TP3 Hit</div>
+                    <div className="text-sm font-semibold text-white">Full Exit</div>
+                    <div className="text-[11px] text-stone-500 font-sans">Final 30% runner closed</div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
-          {/* Right: Clean Desk Visual + 3-TP Stepped Trailing Preview Card */}
-          <div className="lg:col-span-6">
-            <div className="bg-white dark:bg-[#0E182A] border border-slate-300 dark:border-slate-700 rounded-2xl overflow-hidden shadow-2xl">
-              <div className="relative h-60 sm:h-72 bg-slate-100 dark:bg-[#0B1424]">
-                {!heroImgError ? (
-                  <img
-                    src={isDark ? heroDeskDarkImg : heroSwissDayImg}
-                    alt="My Trade institutional trading desk"
-                    referrerPolicy="no-referrer"
-                    onError={() => setHeroImgError(true)}
-                    className="w-full h-full object-cover"
-                  />
-                ) : (
-                  <div className="w-full h-full bg-gradient-to-br from-blue-50 via-slate-100 to-slate-200 dark:from-[#132038] dark:via-[#0B1424] dark:to-[#08101E]" />
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/35 to-transparent" />
-                <div className="absolute bottom-4 left-5 right-5 flex items-end justify-between gap-4">
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.14em] text-sky-300 font-medium">
-                      Automated Protection Logic
-                    </div>
-                    <div className="text-lg font-semibold text-white mt-0.5">
-                      3-TP Stepped Stop-Loss Trailing
-                    </div>
+          {/* Full-Width 4-Column Institutional Proof Strip */}
+          <div className="border-t border-stone-200/80 dark:border-white/[0.08] bg-white/75 dark:bg-[#0A0E16]/85 backdrop-blur-sm">
+            <div className="max-w-7xl mx-auto px-6 lg:px-10 grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-stone-200/80 dark:divide-white/[0.08]">
+              {PROOF_METRICS.map((m) => (
+                <div key={m.value} className="py-5 lg:px-6 first:lg:pl-0 last:lg:pr-0 space-y-0.5">
+                  <div className="font-landing-mono text-lg sm:text-xl font-bold text-stone-950 dark:text-white tracking-tight">
+                    {m.value}
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => onEnterTerminal()}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-white hover:text-sky-300 transition-colors whitespace-nowrap"
-                  >
-                    Live Charts
-                    <ArrowUpRight className="w-3.5 h-3.5" />
-                  </button>
+                  <div className="text-xs font-semibold text-emerald-800 dark:text-emerald-400">
+                    {m.label}
+                  </div>
+                  <div className="text-[11px] text-stone-500 dark:text-stone-400">{m.detail}</div>
                 </div>
-              </div>
-
-              {/* Crisp 3-Step Trailing Ladder Readout */}
-              <div className="p-5 grid grid-cols-3 divide-x divide-slate-200 dark:divide-slate-800 text-xs font-mono-tabular">
-                <div className="pr-4 space-y-1">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-sans">TP1 Reached</div>
-                  <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">SL → Entry</div>
-                  <div className="text-[11px] text-slate-500 font-sans">Breakeven locked</div>
-                </div>
-                <div className="px-4 space-y-1">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-sans">TP2 Reached</div>
-                  <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">SL → TP1</div>
-                  <div className="text-[11px] text-slate-500 font-sans">Profit protected</div>
-                </div>
-                <div className="pl-4 space-y-1">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400 font-sans">TP3 Reached</div>
-                  <div className="text-sm font-semibold text-blue-700 dark:text-sky-400">Book Full TP3</div>
-                  <div className="text-[11px] text-slate-500 font-sans">3/3 target exit</div>
-                </div>
-              </div>
+              ))}
             </div>
           </div>
         </div>
       </section>
 
-      {/* 4. Capabilities Bento Grid */}
-      <section id="capabilities" className="max-w-7xl mx-auto px-6 lg:px-10 py-20 space-y-10 w-full">
-        <div className="max-w-2xl space-y-2">
-          <div className="text-xs font-medium uppercase tracking-[0.16em] text-blue-700 dark:text-sky-400">
-            Execution Architecture
+      {/* 4. Asymmetric Editorial Capabilities Bento Grid (01–04) */}
+      <section
+        id="capabilities"
+        className="max-w-7xl mx-auto px-6 lg:px-10 py-20 space-y-10 w-full"
+      >
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div className="max-w-2xl space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400">
+              Execution Architecture
+            </div>
+            <h2 className="font-landing-display tracking-[-0.025em] text-3xl sm:text-4xl font-semibold text-stone-950 dark:text-white tracking-tight">
+              Engineered for risk discipline, visual clarity, and speed.
+            </h2>
           </div>
-          <h2 className="font-classic-serif text-3xl sm:text-4xl font-semibold text-slate-900 dark:text-white tracking-tight">
-            Built for clarity, capital discipline, and speed.
-          </h2>
+          <button
+            type="button"
+            onClick={() => onEnterTerminal()}
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-800 dark:text-emerald-400 hover:underline underline-offset-4"
+          >
+            Inspect Live Terminal
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          {[
-            {
-              icon: Bot,
-              accent: 'text-emerald-700 dark:text-emerald-400',
-              title: '3-TP Auto-Trade Engine',
-              body: 'Every auto-analyzed signal and Pine bot entry computes TP1, TP2, and TP3 automatically, ratcheting your Stop Loss upward after each TP range hits.',
-              cta: 'Open Auto-Analyzer',
-              action: onEnterAutoAnalyzer,
-            },
-            {
-              icon: Lock,
-              accent: 'text-blue-700 dark:text-sky-400',
-              title: 'Actual vs. Demo Isolation',
-              body: 'Authenticated Actual Live accounts maintain completely separate trade ledgers, P&L charts, and broker execution from your Demo practice sandbox.',
-              cta: 'Choose Account Mode',
-              action: onStartOnboarding,
-            },
-            {
-              icon: Code2,
-              accent: 'text-blue-700 dark:text-sky-400',
-              title: 'Pine Script v5 & TradingView',
-              body: 'Backtest EMA pullback, Supertrend, and ADX strategies over verified market candles with TradingView Pro charting, zoom controls, and equity curves.',
-              cta: 'Launch Pine Studio',
-              action: onEnterPineBot,
-            },
-            {
-              icon: Link2,
-              accent: 'text-emerald-700 dark:text-emerald-400',
-              title: 'Exness MT5 Live Bridge',
-              body: 'Connect your Exness Web & App MT5 account via an encrypted server-side HTTPS bridge with live connection verification and SL modification hooks.',
-              cta: 'View Exness API Guide',
-              action: () => {
-                document.getElementById('exness-api')?.scrollIntoView({ behavior: 'smooth' });
-              },
-            },
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <div
-                key={item.title}
-                className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-2xl p-6 flex flex-col justify-between gap-6 hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
-              >
-                <div className="space-y-3">
-                  <Icon className={`w-5 h-5 ${item.accent}`} />
-                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">{item.title}</h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">{item.body}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={item.action}
-                  className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-800 dark:text-slate-200 hover:text-slate-900 dark:hover:text-white transition-colors w-fit"
-                >
-                  {item.cta}
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* 01 Wide Marquee Card */}
+          <div className="lg:col-span-7 bg-white dark:bg-[#0D1119] border border-stone-200/90 dark:border-white/[0.08] rounded-2xl p-7 flex flex-col justify-between gap-6 hover:border-emerald-600/40 dark:hover:border-emerald-500/35 transition-colors">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs font-landing-mono">
+                <span className="text-stone-400 dark:text-stone-500">01.</span>
+                <Bot className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
               </div>
-            );
-          })}
+              <h3 className="font-landing-display tracking-[-0.025em] text-2xl font-semibold text-stone-950 dark:text-white">
+                3-TP Auto-Trade &amp; Partial Booking Engine
+              </h3>
+              <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed max-w-xl">
+                Every auto-analyzed signal and Pine Script v5 bot entry calculates ADX trend regime, spread cost, and three institutional targets — banking 40% at TP1, 30% at TP2, and trailing Stop Loss automatically to protect realized gains.
+              </p>
+              <div className="grid grid-cols-3 gap-3 pt-2 font-landing-mono text-[11px]">
+                <div className="p-3 rounded-xl bg-[#F6F4EE] dark:bg-[#07090E] border border-stone-200/80 dark:border-white/[0.07]">
+                  <div className="text-stone-500 dark:text-stone-400">Entry Gate</div>
+                  <div className="font-semibold text-stone-900 dark:text-white mt-0.5">
+                    ADX &amp; News Shield
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-[#F6F4EE] dark:bg-[#07090E] border border-stone-200/80 dark:border-white/[0.07]">
+                  <div className="text-stone-500 dark:text-stone-400">Stop Ratchet</div>
+                  <div className="font-semibold text-emerald-700 dark:text-emerald-400 mt-0.5">
+                    BE → TP1 Auto
+                  </div>
+                </div>
+                <div className="p-3 rounded-xl bg-[#F6F4EE] dark:bg-[#07090E] border border-stone-200/80 dark:border-white/[0.07]">
+                  <div className="text-stone-500 dark:text-stone-400">Monitor Loop</div>
+                  <div className="font-semibold text-amber-700 dark:text-amber-400 mt-0.5">
+                    24/7 Server Guard
+                  </div>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={onEnterAutoAnalyzer}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-950 dark:text-white hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors w-fit"
+            >
+              Open Auto-Analyzer
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* 02 Focused Card */}
+          <div className="lg:col-span-5 bg-white dark:bg-[#0D1119] border border-stone-200/90 dark:border-white/[0.08] rounded-2xl p-7 flex flex-col justify-between gap-6 hover:border-emerald-600/40 dark:hover:border-emerald-500/35 transition-colors">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs font-landing-mono">
+                <span className="text-stone-400 dark:text-stone-500">02.</span>
+                <Lock className="w-5 h-5 text-amber-700 dark:text-amber-400" />
+              </div>
+              <h3 className="font-landing-display tracking-[-0.025em] text-2xl font-semibold text-stone-950 dark:text-white">
+                Strict Actual vs. Demo Isolation
+              </h3>
+              <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed">
+                Authenticated Actual Live accounts keep separate trade ledgers, equity curves, daily drawdown locks, and broker routes from your Demo sandbox. Live trades never silently fall back to paper fills.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onStartOnboarding}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-950 dark:text-white hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors w-fit"
+            >
+              Configure Account Mode
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* 03 Focused Card */}
+          <div className="lg:col-span-5 bg-white dark:bg-[#0D1119] border border-stone-200/90 dark:border-white/[0.08] rounded-2xl p-7 flex flex-col justify-between gap-6 hover:border-emerald-600/40 dark:hover:border-emerald-500/35 transition-colors">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs font-landing-mono">
+                <span className="text-stone-400 dark:text-stone-500">03.</span>
+                <Code2 className="w-5 h-5 text-emerald-700 dark:text-emerald-400" />
+              </div>
+              <h3 className="font-landing-display tracking-[-0.025em] text-2xl font-semibold text-stone-950 dark:text-white">
+                Trendline, Fibonacci &amp; Pine v5 Studio
+              </h3>
+              <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed">
+                Draw persistent Trend Lines, Extended Rays, Fibonacci Retracements (with 61.8% Golden Pocket highlighting), and Supply/Demand zones across full-width Single or Dual MTF split charts alongside Pine Script v5 backtesting.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onEnterPineBot}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-950 dark:text-white hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors w-fit"
+            >
+              Launch Pine &amp; Chart Studio
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* 04 Wide Marquee Card */}
+          <div className="lg:col-span-7 bg-white dark:bg-[#0D1119] border border-stone-200/90 dark:border-white/[0.08] rounded-2xl p-7 flex flex-col justify-between gap-6 hover:border-emerald-600/40 dark:hover:border-emerald-500/35 transition-colors">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between text-xs font-landing-mono">
+                <span className="text-stone-400 dark:text-stone-500">04.</span>
+                <Link2 className="w-5 h-5 text-amber-700 dark:text-amber-400" />
+              </div>
+              <h3 className="font-landing-display tracking-[-0.025em] text-2xl font-semibold text-stone-950 dark:text-white">
+                Encrypted Exness MT5 Live Bridge &amp; TradeZella Journal
+              </h3>
+              <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed max-w-xl">
+                Connect your Exness Web or App MT5 account through a dedicated server-side HTTPS bridge with zero broker secrets exposed to the browser — paired with a calendar P&amp;L heatmap, R-multiple expectancy audit, and CSV export.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                document.getElementById('exness-api')?.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-stone-950 dark:text-white hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors w-fit"
+            >
+              Read Exness MT5 API Guide
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
         </div>
       </section>
 
       {/* 5. Side-by-Side Actual Account vs Demo Account Separation */}
-      <section id="accounts" className="border-y border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424] w-full">
+      <section
+        id="accounts"
+        className="border-y border-stone-200/90 dark:border-white/[0.08] bg-white dark:bg-[#0B0F17] w-full"
+      >
         <div className="max-w-7xl mx-auto px-6 lg:px-10 py-20 space-y-10">
           <div className="max-w-2xl space-y-2">
-            <div className="text-xs font-medium uppercase tracking-[0.16em] text-blue-700 dark:text-sky-400">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400">
               Account Separation
             </div>
-            <h2 className="font-classic-serif text-3xl sm:text-4xl font-semibold text-slate-900 dark:text-white tracking-tight">
-              Two clean environments. Zero accidental cross-execution.
+            <h2 className="font-landing-display tracking-[-0.025em] text-3xl sm:text-4xl font-semibold text-stone-950 dark:text-white tracking-tight">
+              Two isolated environments. Zero accidental cross-execution.
             </h2>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Actual Trading Account */}
-            <div className="bg-white dark:bg-[#0E182A] border border-blue-200 dark:border-sky-500/35 rounded-2xl p-7 flex flex-col justify-between gap-6">
+            <div className="bg-[#F6F4EE] dark:bg-[#0D1119] border border-emerald-700/30 dark:border-emerald-500/35 rounded-2xl p-8 flex flex-col justify-between gap-6">
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-blue-700 dark:text-sky-400">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-800 dark:text-emerald-400">
                     Actual Trading Account · LIVE
                   </span>
-                  <span className="text-xs font-mono-tabular text-slate-500 dark:text-slate-400">
+                  <span className="text-xs font-landing-mono text-stone-500 dark:text-stone-400">
                     {exnessConfigured ? 'Exness Bridge Verified' : 'Google Login Required'}
                   </span>
                 </div>
-                <h3 className="font-classic-serif text-2xl font-semibold text-slate-900 dark:text-white">
+                <h3 className="font-landing-display tracking-[-0.025em] text-2xl font-semibold text-stone-950 dark:text-white">
                   Live Broker &amp; Exness MT5 Execution
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                  Protected by Firebase Google Sign-In. Displays exclusively live broker orders, live P&amp;L history, and server-side Exness MT5 / Indian broker routing — completely separated from Demo wallet funds.
+                <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed">
+                  Protected by Firebase Authentication. Tracks exclusively live broker orders, live equity balance, and server-side Exness MT5 / Indian broker routing — completely separated from Demo wallet funds.
                 </p>
-                <ul className="space-y-2 text-xs text-slate-700 dark:text-slate-300 pt-2">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-700 dark:text-sky-400 shrink-0" />
-                    Dedicated live ledger &amp; live Daily P&amp;L curve
+                <ul className="space-y-2.5 text-xs text-stone-700 dark:text-stone-300 pt-2">
+                  <li className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                    Dedicated live ledger, audit trail &amp; live Daily P&amp;L curve
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-700 dark:text-sky-400 shrink-0" />
-                    Automatic SL modification hooks on TP1 &amp; TP2 hits
+                  <li className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                    Automatic broker SL modification hooks on TP1 &amp; TP2 hits
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-blue-700 dark:text-sky-400 shrink-0" />
-                    Never silently falls back to paper orders
+                  <li className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-700 dark:text-emerald-400 shrink-0" />
+                    Strict live routing — never silently falls back to paper fills
                   </li>
                 </ul>
               </div>
               <button
                 type="button"
                 onClick={onEnterActualAccount}
-                className="w-full py-3 px-4 bg-blue-700 dark:bg-sky-500 hover:bg-blue-800 dark:hover:bg-sky-400 text-white dark:text-slate-950 text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3.5 px-4 bg-emerald-700 dark:bg-emerald-500 hover:bg-emerald-800 dark:hover:bg-emerald-400 text-white dark:text-stone-950 text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 {isSignedIn ? 'Enter Actual Live Account' : 'Sign In with Google for Actual Account'}
                 <ArrowRight className="w-4 h-4" />
@@ -522,70 +710,72 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
             </div>
 
             {/* Demo Practice Account */}
-            <div className="bg-white dark:bg-[#0E182A] border border-slate-300 dark:border-slate-700 rounded-2xl p-7 flex flex-col justify-between gap-6">
+            <div className="bg-[#F6F4EE] dark:bg-[#0D1119] border border-stone-300 dark:border-white/[0.10] rounded-2xl p-8 flex flex-col justify-between gap-6">
               <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700 dark:text-emerald-400">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold uppercase tracking-[0.14em] text-amber-800 dark:text-amber-400">
                     Demo Practice Account · PAPER
                   </span>
-                  <span className="text-xs font-mono-tabular text-slate-500 dark:text-slate-400">
+                  <span className="text-xs font-landing-mono text-stone-500 dark:text-stone-400">
                     100,000 Virtual Capital
                   </span>
                 </div>
-                <h3 className="font-classic-serif text-2xl font-semibold text-slate-900 dark:text-white">
+                <h3 className="font-landing-display tracking-[-0.025em] text-2xl font-semibold text-stone-950 dark:text-white">
                   Isolated Paper Sandbox &amp; Strategy Testing
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                  Validate 3-TP stepped trailing, multi-market Auto-Analyzer scans, and Pine Script v5 bots on live market prices with customizable demo deposits and instant resets — zero risk to real funds.
+                <p className="text-xs sm:text-sm text-stone-600 dark:text-stone-400 leading-relaxed">
+                  Validate 3-TP stepped trailing, multi-market Auto-Analyzer scans, and Pine Script v5 bots on live market bid/ask spreads with customizable deposits and instant resets — zero risk to live capital.
                 </p>
-                <ul className="space-y-2 text-xs text-slate-700 dark:text-slate-300 pt-2">
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
-                    Dedicated demo wallet (deposit, withdraw, reset)
+                <ul className="space-y-2.5 text-xs text-stone-700 dark:text-stone-300 pt-2">
+                  <li className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                    Dedicated demo wallet (deposit, withdraw, instant reset)
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
-                    Live mark-to-market 3-TP auto-trailing &amp; auto-close
+                  <li className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                    Live mark-to-market 40/30/30 partial booking &amp; auto-trail
                   </li>
-                  <li className="flex items-center gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400 shrink-0" />
-                    Never touches live broker endpoints
+                  <li className="flex items-center gap-2.5">
+                    <CheckCircle2 className="w-4 h-4 text-amber-700 dark:text-amber-400 shrink-0" />
+                    100% air-gapped from live broker endpoints
                   </li>
                 </ul>
               </div>
               <button
                 type="button"
                 onClick={onEnterDemoAccount}
-                className="w-full py-3 px-4 bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                className="w-full py-3.5 px-4 bg-white dark:bg-[#141B29] hover:bg-stone-100 dark:hover:bg-[#1B2436] border border-stone-300 dark:border-white/[0.14] text-stone-950 dark:text-white text-xs font-semibold rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 Launch Demo Account
-                <ArrowRight className="w-4 h-4 text-emerald-700 dark:text-emerald-400" />
+                <ArrowRight className="w-4 h-4 text-amber-700 dark:text-amber-400" />
               </button>
             </div>
           </div>
         </div>
       </section>
 
-      {/* 6. Live Markets Desk */}
+      {/* 6. Live Markets Desk with Sparklines */}
       <section id="markets" className="max-w-7xl mx-auto px-6 lg:px-10 py-20 space-y-8 w-full">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="space-y-2">
-            <div className="text-xs font-medium uppercase tracking-[0.16em] text-blue-700 dark:text-sky-400">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400">
               Live Market Coverage
             </div>
-            <h2 className="font-classic-serif text-3xl font-semibold text-slate-900 dark:text-white tracking-tight">
+            <h2 className="font-landing-display tracking-[-0.025em] text-3xl sm:text-4xl font-semibold text-stone-950 dark:text-white tracking-tight">
               32 Instruments Across 3 Global Desks
             </h2>
           </div>
 
-          <div className="flex items-center bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-lg p-1 text-xs">
+          <div className="flex items-center bg-white dark:bg-[#0D1119] border border-stone-200 dark:border-white/[0.10] rounded-xl p-1 text-xs">
             {DESK_GROUPS.map((g) => (
               <button
                 key={g.id}
                 type="button"
                 onClick={() => setActiveDesk(g.id)}
-                className={`px-3.5 py-1.5 rounded-md font-medium transition-colors whitespace-nowrap ${
-                  activeDesk === g.id ? 'bg-blue-700 dark:bg-slate-800 text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                className={`px-4 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap ${
+                  activeDesk === g.id
+                    ? 'bg-emerald-700 dark:bg-emerald-500 text-white dark:text-stone-950 font-semibold'
+                    : 'text-stone-600 dark:text-stone-400 hover:text-stone-950 dark:hover:text-white'
                 }`}
               >
                 {g.id === 'INDIAN' ? 'India NSE' : g.id === 'MCX' ? 'MCX' : 'Global & Exness'}
@@ -594,45 +784,59 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
           </div>
         </div>
 
-        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-2xl overflow-hidden">
-          <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div className="bg-white dark:bg-[#0D1119] border border-stone-200/90 dark:border-white/[0.08] rounded-2xl overflow-hidden">
+          <div className="px-6 py-4 border-b border-stone-200/80 dark:border-white/[0.08] flex flex-wrap items-center justify-between gap-2">
             <div>
-              <div className="text-sm font-semibold text-slate-900 dark:text-white">{currentGroup.title}</div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">{currentGroup.subtitle}</div>
+              <div className="text-sm font-semibold text-stone-950 dark:text-white">
+                {currentGroup.title}
+              </div>
+              <div className="text-xs text-stone-500 dark:text-stone-400">
+                {currentGroup.subtitle}
+              </div>
             </div>
             <button
               type="button"
               onClick={() => onEnterTerminal()}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300"
             >
-              Open Full TradingView Terminal
+              Open Full Chart Terminal
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
 
-          <div className="divide-y divide-slate-200 dark:divide-slate-800">
+          <div className="divide-y divide-stone-200/80 dark:divide-white/[0.06]">
             {currentGroup.ids.map((id) => {
               const q = quotes[id];
               const pos = (q?.changePercent ?? 0) >= 0;
               return (
                 <div
                   key={id}
-                  className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-slate-100 dark:hover:bg-white/[0.06] transition-colors text-xs"
+                  className="px-6 py-4 flex items-center justify-between gap-4 hover:bg-[#F6F4EE]/70 dark:hover:bg-white/[0.03] transition-colors text-xs"
                 >
                   <div>
-                    <div className="font-semibold text-slate-900 dark:text-white">{q?.symbol ?? id}</div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">{q?.exchangeLabel ?? 'Live Feed'}</div>
-                  </div>
-                  <div className="flex items-center gap-5 sm:gap-6 font-mono-tabular">
-                    <div className="hidden sm:flex items-center">
-                      <Sparkline values={q?.sparkline ?? []} positive={pos} width={84} height={26} />
+                    <div className="font-semibold text-stone-950 dark:text-white">
+                      {q?.symbol ?? id}
                     </div>
-                    <div className="text-right">
-                      <div className="text-sm font-semibold text-slate-900 dark:text-white">
+                    <div className="text-[11px] text-stone-500 dark:text-stone-400">
+                      {q?.exchangeLabel ?? 'Live Feed'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-5 sm:gap-6 font-landing-mono">
+                    <div className="hidden sm:flex items-center">
+                      <Sparkline values={q?.sparkline ?? []} positive={pos} width={88} height={26} />
+                    </div>
+                    <div className="text-right min-w-[92px]">
+                      <div className="text-sm font-semibold text-stone-950 dark:text-white">
                         {q ? `${q.currency}${q.price.toLocaleString()}` : 'Syncing...'}
                       </div>
                       {q && (
-                        <div className={`text-[11px] ${pos ? 'text-emerald-700 dark:text-emerald-400' : 'text-rose-700 dark:text-rose-400'}`}>
+                        <div
+                          className={`text-[11px] ${
+                            pos
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-rose-700 dark:text-rose-400'
+                          }`}
+                        >
                           {pos ? '+' : ''}
                           {q.changePercent.toFixed(2)}%
                         </div>
@@ -641,7 +845,7 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
                     <button
                       type="button"
                       onClick={() => onEnterTerminal(id)}
-                      className="px-3 py-1.5 bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg font-sans font-medium whitespace-nowrap"
+                      className="px-3.5 py-1.5 bg-[#F6F4EE] dark:bg-[#131926] hover:bg-stone-200 dark:hover:bg-[#1A2233] border border-stone-200 dark:border-white/[0.10] text-stone-900 dark:text-stone-100 rounded-lg font-sans font-medium whitespace-nowrap transition-colors"
                     >
                       Chart →
                     </button>
@@ -654,13 +858,16 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
       </section>
 
       {/* 7. Exness Web / App MT5 API Integration Section */}
-      <section id="exness-api" className="border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424] w-full">
+      <section
+        id="exness-api"
+        className="border-t border-stone-200/90 dark:border-white/[0.08] bg-white dark:bg-[#0B0F17] w-full"
+      >
         <div className="max-w-7xl mx-auto px-6 lg:px-10 py-20 space-y-8">
           <div className="max-w-2xl space-y-2">
-            <div className="text-xs font-medium uppercase tracking-[0.16em] text-blue-700 dark:text-sky-400">
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-emerald-800 dark:text-emerald-400">
               Exness Live Connection Guide
             </div>
-            <h2 className="font-classic-serif text-3xl font-semibold text-slate-900 dark:text-white tracking-tight">
+            <h2 className="font-landing-display tracking-[-0.025em] text-3xl sm:text-4xl font-semibold text-stone-950 dark:text-white tracking-tight">
               Connect your Exness Web or App account via MT5 API Bridge
             </h2>
           </div>
@@ -669,26 +876,32 @@ export const ClassicLandingPage: React.FC<ClassicLandingPageProps> = ({
         </div>
       </section>
 
-      {/* 8. Quiet Footer */}
-      <footer className="border-t border-slate-200 dark:border-slate-800 bg-[#F4F6FA] dark:bg-[#08101E]">
-        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-10 flex flex-wrap items-center justify-between gap-4 text-xs text-slate-500">
+      {/* 8. Quiet Editorial Footer */}
+      <footer className="border-t border-stone-200/90 dark:border-white/[0.08] bg-[#F6F4EE] dark:bg-[#07090E]">
+        <div className="max-w-7xl mx-auto px-6 lg:px-10 py-10 flex flex-wrap items-center justify-between gap-4 text-xs text-stone-500 dark:text-stone-400">
           <div className="flex items-center gap-3">
-            <span className="font-classic-serif text-base font-semibold text-slate-900 dark:text-white">My Trade</span>
+            <span className="font-landing-display tracking-[-0.025em] text-base font-semibold text-stone-950 dark:text-white">
+              My Trade
+            </span>
             <span>·</span>
-            <span>Multi-Asset Trading, 3-TP Stepped Trailing &amp; Exness MT5 Bridge</span>
+            <span>Multi-Asset Execution, Fibonacci Charting &amp; Exness MT5 Bridge</span>
           </div>
           <div className="flex items-center gap-4">
             <button
               type="button"
               onClick={toggleTheme}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white dark:bg-[#111622] hover:bg-stone-100 dark:hover:bg-[#171E2E] border border-stone-200 dark:border-white/[0.10] text-stone-800 dark:text-stone-200 rounded-lg transition-colors whitespace-nowrap"
             >
-              {isDark ? <Sun className="w-3.5 h-3.5 text-amber-700 dark:text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-blue-700" />}
-              {isDark ? 'Daylight Theme' : 'Midnight Theme'}
+              {isDark ? (
+                <Sun className="w-3.5 h-3.5 text-amber-400" />
+              ) : (
+                <Moon className="w-3.5 h-3.5 text-emerald-700" />
+              )}
+              {isDark ? 'Alabaster Light' : 'Obsidian Dark'}
             </button>
-            <TrendingUp className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-            <Layers className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400" />
-            <span>Trading involves market risk. Always test strategies on Demo first.</span>
+            <TrendingUp className="w-3.5 h-3.5 text-stone-400" />
+            <Layers className="w-3.5 h-3.5 text-stone-400" />
+            <span>Trading involves market risk. Validate strategies on Demo first.</span>
           </div>
         </div>
       </footer>

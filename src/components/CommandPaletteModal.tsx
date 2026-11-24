@@ -21,12 +21,15 @@ interface CommandPaletteModalProps {
   open: boolean;
   isDark: boolean;
   activeAccountType: 'LIVE' | 'DEMO';
+  isMasterAdmin?: boolean;
   onClose: () => void;
   onSelectInstrument: (instrumentId: string) => void;
   onNavigateTab: (
     tab: 'dashboard' | 'terminal' | 'analyzer' | 'journal' | 'account' | 'settings' | 'mobile'
   ) => void;
   onSwitchAccountType: (next: 'LIVE' | 'DEMO') => void;
+  onEnterDemoAccount: () => void;
+  onEnterActualAccount: () => void;
   onToggleTheme: () => void;
 }
 
@@ -44,10 +47,13 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   open,
   isDark,
   activeAccountType,
+  isMasterAdmin = false,
   onClose,
   onSelectInstrument,
   onNavigateTab,
   onSwitchAccountType,
+  onEnterDemoAccount,
+  onEnterActualAccount,
   onToggleTheme,
 }) => {
   const [query, setQuery] = useState('');
@@ -104,14 +110,18 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
         icon: UserCog,
         action: () => onNavigateTab('account'),
       },
-      {
-        id: 'nav-settings',
-        group: 'Navigation',
-        title: 'Admin & Strategy Settings',
-        subtitle: 'EMA/RSI parameters, Telegram channel & kill switch',
-        icon: Settings,
-        action: () => onNavigateTab('settings'),
-      },
+      ...(isMasterAdmin
+        ? [
+            {
+              id: 'nav-settings',
+              group: 'Navigation' as const,
+              title: 'Admin & Strategy Settings',
+              subtitle: 'EMA/RSI parameters, Telegram channel & kill switch',
+              icon: Settings,
+              action: () => onNavigateTab('settings'),
+            },
+          ]
+        : []),
       {
         id: 'nav-mobile',
         group: 'Navigation',
@@ -124,18 +134,25 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
 
     const quickActions: CommandItem[] = [
       {
-        id: 'act-account',
+        id: 'act-demo',
         group: 'Quick Actions',
-        title:
-          activeAccountType === 'LIVE'
-            ? 'Switch to Demo Practice Account'
-            : 'Switch to Actual Live Account',
-        subtitle:
-          activeAccountType === 'LIVE'
-            ? 'Move to isolated virtual paper trading sandbox'
-            : 'Switch to authenticated Live Broker / Exness MT5 desk',
-        icon: activeAccountType === 'LIVE' ? Wallet : ShieldCheck,
-        action: () => onSwitchAccountType(activeAccountType === 'LIVE' ? 'DEMO' : 'LIVE'),
+        title: 'Open Demo Practice Account (Paper Only)',
+        subtitle: 'Strictly enters isolated Demo sandbox · Never touches Real/Live balance',
+        badge: activeAccountType === 'DEMO' ? 'ACTIVE' : 'DEMO',
+        icon: Wallet,
+        action: () => {
+          onSwitchAccountType('DEMO');
+          onEnterDemoAccount();
+        },
+      },
+      {
+        id: 'act-live',
+        group: 'Quick Actions',
+        title: 'Open Actual Live Account (Verified Google Login)',
+        subtitle: 'Switches to authenticated Live Broker / Exness MT5 desk',
+        badge: activeAccountType === 'LIVE' ? 'ACTIVE' : 'LIVE',
+        icon: ShieldCheck,
+        action: onEnterActualAccount,
       },
       {
         id: 'act-theme',
@@ -160,7 +177,17 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     }));
 
     return [...quickActions, ...navItems, ...marketItems];
-  }, [activeAccountType, isDark, onNavigateTab, onSelectInstrument, onSwitchAccountType, onToggleTheme]);
+  }, [
+    activeAccountType,
+    isDark,
+    isMasterAdmin,
+    onEnterActualAccount,
+    onEnterDemoAccount,
+    onNavigateTab,
+    onSelectInstrument,
+    onSwitchAccountType,
+    onToggleTheme,
+  ]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

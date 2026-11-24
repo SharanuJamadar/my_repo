@@ -18,13 +18,18 @@ import {
 } from 'lightweight-charts';
 import {
   AlertCircle,
+  AlignJustify,
   ArrowRightToLine,
+  ArrowUpRight,
   BarChart3,
   Bell,
+  Calendar,
   CandlestickChart,
   Crosshair,
   ExternalLink,
+  FileText,
   Layers,
+  List,
   Maximize2,
   Minimize2,
   Minus,
@@ -33,6 +38,7 @@ import {
   RefreshCw,
   RotateCcw,
   Ruler,
+  Square,
   Trash2,
   TrendingUp,
   Undo2,
@@ -67,12 +73,21 @@ interface TradingChartProps {
   onLivePriceTick?: (instrumentId: string, price: number) => void;
   onQuickOrder?: (side: 'BUY' | 'SELL', quantity: number) => Promise<void> | void;
   onQuickPriceAlert?: (price: number) => void;
+  headerAccessory?: React.ReactNode;
+  secondaryStrip?: React.ReactNode;
   compact?: boolean;
 }
 
 type ChartMode = 'MY_TRADE_LIVE' | 'TRADING_VIEW';
 type ChartStyle = 'CANDLES' | 'AREA';
-type DrawingTool = 'CROSSHAIR' | 'TRENDLINE' | 'HLINE' | 'MEASURE';
+type DrawingTool =
+  | 'CROSSHAIR'
+  | 'TRENDLINE'
+  | 'RAY'
+  | 'FIBONACCI'
+  | 'HLINE'
+  | 'RECTANGLE'
+  | 'MEASURE';
 type WsConnStatus = 'IDLE' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING';
 
 interface LogicalPoint {
@@ -83,6 +98,27 @@ interface LogicalPoint {
 interface TrendlineDrawing {
   id: string;
   kind: 'TRENDLINE';
+  p1: LogicalPoint;
+  p2: LogicalPoint;
+}
+
+interface RayDrawing {
+  id: string;
+  kind: 'RAY';
+  p1: LogicalPoint;
+  p2: LogicalPoint;
+}
+
+interface FibonacciDrawing {
+  id: string;
+  kind: 'FIBONACCI';
+  p1: LogicalPoint;
+  p2: LogicalPoint;
+}
+
+interface RectangleDrawing {
+  id: string;
+  kind: 'RECTANGLE';
   p1: LogicalPoint;
   p2: LogicalPoint;
 }
@@ -100,7 +136,23 @@ interface HLineDrawing {
   price: number;
 }
 
-type UserDrawing = TrendlineDrawing | MeasureDrawing | HLineDrawing;
+type UserDrawing =
+  | TrendlineDrawing
+  | RayDrawing
+  | FibonacciDrawing
+  | RectangleDrawing
+  | MeasureDrawing
+  | HLineDrawing;
+
+const FIB_LEVELS = [
+  { ratio: 0, label: '0.0%', color: '#94A3B8', band: 'rgba(148, 163, 184, 0.07)' },
+  { ratio: 0.236, label: '23.6%', color: '#38BDF8', band: 'rgba(56, 189, 248, 0.08)' },
+  { ratio: 0.382, label: '38.2%', color: '#10B981', band: 'rgba(16, 185, 129, 0.09)' },
+  { ratio: 0.5, label: '50.0%', color: '#818CF8', band: 'rgba(245, 158, 11, 0.14)' },
+  { ratio: 0.618, label: '61.8% GP', color: '#F59E0B', band: 'rgba(236, 72, 153, 0.08)' },
+  { ratio: 0.786, label: '78.6%', color: '#EC4899', band: 'rgba(148, 163, 184, 0.06)' },
+  { ratio: 1, label: '100.0%', color: '#94A3B8', band: 'transparent' },
+] as const;
 
 interface HoveredBarStats {
   open: number;
@@ -176,6 +228,83 @@ function formatPrice(val: number): string {
 
 const TIMEFRAMES: Timeframe[] = ['5m', '15m', '1h', '4h', '1d'];
 
+const TV_DEFAULT_WATCHLIST = [
+  'OANDA:XAUUSD',
+  'OANDA:XAGUSD',
+  'NSE:NIFTY',
+  'NSE:BANKNIFTY',
+  'TVC:USOIL',
+  'NASDAQ:NDX',
+  'SP:SPX',
+  'FX:EURUSD',
+  'FX:GBPUSD',
+  'BINANCE:BTCUSDT',
+  'BINANCE:ETHUSDT',
+  'BINANCE:SOLUSDT',
+];
+
+interface TradingViewAdvancedEmbedProps {
+  symbol: string;
+  interval: string;
+  theme: 'dark' | 'light';
+  showDetails: boolean;
+  showWatchlist: boolean;
+  showCalendar: boolean;
+}
+
+const TradingViewAdvancedEmbed: React.FC<TradingViewAdvancedEmbedProps> = React.memo(
+  ({ symbol, interval, theme, showDetails, showWatchlist, showCalendar }) => {
+    const hostRef = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+      const host = hostRef.current;
+      if (!host) return;
+      host.innerHTML = '';
+
+      const widgetDiv = document.createElement('div');
+      widgetDiv.className = 'tradingview-widget-container__widget w-full h-full';
+      host.appendChild(widgetDiv);
+
+      const script = document.createElement('script');
+      script.src =
+        'https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js';
+      script.type = 'text/javascript';
+      script.async = true;
+      script.innerHTML = JSON.stringify({
+        autosize: true,
+        symbol,
+        interval,
+        timezone: 'Asia/Kolkata',
+        theme,
+        style: '1',
+        locale: 'en',
+        backgroundColor: theme === 'dark' ? '#0B1424' : '#FFFFFF',
+        gridColor: theme === 'dark' ? 'rgba(148, 163, 184, 0.08)' : 'rgba(15, 23, 42, 0.06)',
+        allow_symbol_change: true,
+        hide_top_toolbar: false,
+        hide_side_toolbar: false,
+        hide_legend: false,
+        hide_volume: false,
+        save_image: true,
+        withdateranges: true,
+        details: showDetails,
+        hotlist: false,
+        calendar: showCalendar,
+        watchlist: showWatchlist ? TV_DEFAULT_WATCHLIST : undefined,
+        studies: ['STD;EMA', 'STD;VWAP'],
+        support_host: 'https://www.tradingview.com',
+      });
+      host.appendChild(script);
+
+      return () => {
+        host.innerHTML = '';
+      };
+    }, [symbol, interval, theme, showDetails, showWatchlist, showCalendar]);
+
+    return <div ref={hostRef} className="tradingview-widget-container w-full h-full" />;
+  }
+);
+
 export const TradingChart: React.FC<TradingChartProps> = ({
   instrument,
   quote,
@@ -192,6 +321,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   onLivePriceTick,
   onQuickOrder,
   onQuickPriceAlert,
+  headerAccessory,
+  secondaryStrip,
   compact = false,
 }) => {
   const { isDark } = useTheme();
@@ -227,7 +358,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   onLivePriceTickRef.current = onLivePriceTick;
   const liveHeaderPriceRef = useRef<HTMLSpanElement | null>(null);
 
-  const [chartMode, setChartMode] = useState<ChartMode>('MY_TRADE_LIVE');
+  const [chartMode, setChartMode] = useState<ChartMode>('TRADING_VIEW');
   const [chartStyle, setChartStyle] = useState<ChartStyle>('CANDLES');
   const [wsStatus, setWsStatus] = useState<WsConnStatus>('IDLE');
   const [showEmas, setShowEmas] = useState(true);
@@ -236,7 +367,12 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const [showLevels, setShowLevels] = useState(true);
   const [isExpanded, setIsExpanded] = useState(false);
 
-  // Interactive TradingView-style Drawing Tools & Crosshair HUD
+  // Full TradingView Advanced Chart panel toggles
+  const [tvShowWatchlist, setTvShowWatchlist] = useState(false);
+  const [tvShowDetails, setTvShowDetails] = useState(false);
+  const [tvShowCalendar, setTvShowCalendar] = useState(false);
+
+  // Interactive TradingView-style Drawing Tools & Crosshair HUD (for My Trade Live mode)
   const [activeTool, setActiveTool] = useState<DrawingTool>('CROSSHAIR');
   const [drawings, setDrawings] = useState<UserDrawing[]>([]);
   const [pendingPoint, setPendingPoint] = useState<LogicalPoint | null>(null);
@@ -248,7 +384,19 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const loadedDrawingsKeyRef = useRef<string>('');
 
   const supportsBinanceWs = Boolean(instrument.binanceSymbol || instrument.binanceFuturesSymbol);
-  const chartHeight = isExpanded ? 580 : compact ? 380 : 450;
+  const chartHeight = isExpanded ? 780 : compact ? 620 : 700;
+
+  const selectDrawingTool = useCallback(
+    (tool: DrawingTool) => {
+      if (tool !== 'CROSSHAIR' && chartMode !== 'MY_TRADE_LIVE') {
+        setChartMode('MY_TRADE_LIVE');
+      }
+      setActiveTool(tool);
+      setPendingPoint(null);
+      setPreviewPoint(null);
+    },
+    [chartMode]
+  );
 
   const uniqueCandles = useMemo(() => {
     if (!quote?.candles?.length) return [];
@@ -1233,7 +1381,13 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       return;
     }
 
-    if (activeTool === 'TRENDLINE' || activeTool === 'MEASURE') {
+    if (
+      activeTool === 'TRENDLINE' ||
+      activeTool === 'RAY' ||
+      activeTool === 'FIBONACCI' ||
+      activeTool === 'RECTANGLE' ||
+      activeTool === 'MEASURE'
+    ) {
       if (!pendingPoint) {
         setPendingPoint(pt);
         setPreviewPoint(pt);
@@ -1270,15 +1424,15 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     return { x: Number(x), y: Number(y) };
   };
 
-  const tvEmbedUrl = useMemo(() => {
-    const tvSymbol = instrument.tradingViewSymbol;
-    const tvInterval = mapTimeframeToTv(timeframe);
-    const tvTheme = isDark ? 'dark' : 'light';
-    const tvBg = isDark ? '0B1424' : 'FFFFFF';
-    return `https://s.tradingview.com/widgetembed/?frameElementId=mytrade_tv_widget&symbol=${encodeURIComponent(
-      tvSymbol
-    )}&interval=${tvInterval}&hidesidetoolbar=0&hidetoptoolbar=0&symboledit=1&saveimage=1&toolbarbg=${tvBg}&studies=%5B%22MAExp%40tv-basicstudies%22%2C%22VWAP%40tv-basicstudies%22%2C%22RSI%40tv-basicstudies%22%5D&theme=${tvTheme}&style=1&timezone=Asia%2FKolkata&withdateranges=1&details=0&showpopupbutton=0&locale=en`;
-  }, [instrument.tradingViewSymbol, timeframe, isDark]);
+  const priceToY = (price: number): number | null => {
+    void renderTick;
+    const series = mainSeriesRef.current;
+    if (!series) return null;
+    const y = series.priceToCoordinate(price);
+    return y === null ? null : Number(y);
+  };
+
+  const tvInterval = useMemo(() => mapTimeframeToTv(timeframe), [timeframe]);
 
   const tvExternalChartUrl = `https://www.tradingview.com/chart/?symbol=${encodeURIComponent(
     instrument.tradingViewSymbol
@@ -1288,7 +1442,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
   return (
     <div
-      className={`bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col ${
+      className={`bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl overflow-hidden flex flex-col h-full ${
         isExpanded ? 'fixed inset-3 z-50 shadow-2xl' : ''
       }`}
     >
@@ -1297,6 +1451,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-900 dark:text-white">
             <span>{quote?.instrument.symbol ?? instrument.symbol}</span>
+            {headerAccessory && <span className="inline-flex items-center">{headerAccessory}</span>}
             <span className="text-slate-500">·</span>
             <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
               {quote?.instrument.exchangeLabel ?? instrument.exchangeLabel}
@@ -1325,7 +1480,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
           </div>
           <p className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
             {chartMode === 'TRADING_VIEW'
-              ? `TradingView Interactive Chart (${instrument.tradingViewSymbol}) · Drawing tools, indicators & zoom enabled`
+              ? `TradingView Full Advanced Chart (${instrument.tradingViewSymbol}) · All drawing tools, Fibonacci, indicators, compare & symbol search`
               : quote?.available
                 ? `${quote.provider} · ${
                     supportsBinanceWs
@@ -1339,8 +1494,19 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Chart Engine Mode Switch: My Trade Live vs TradingView */}
+          {/* Chart Engine Mode Switch: TradingView Full vs My Trade Live */}
           <div className="flex items-center bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setChartMode('TRADING_VIEW')}
+              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
+                chartMode === 'TRADING_VIEW'
+                  ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950 font-semibold'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              TradingView Pro
+            </button>
             <button
               type="button"
               onClick={() => setChartMode('MY_TRADE_LIVE')}
@@ -1351,17 +1517,6 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               }`}
             >
               My Trade Live
-            </button>
-            <button
-              type="button"
-              onClick={() => setChartMode('TRADING_VIEW')}
-              className={`px-2.5 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                chartMode === 'TRADING_VIEW'
-                  ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950 font-semibold'
-                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
-              }`}
-            >
-              TradingView
             </button>
           </div>
 
@@ -1421,6 +1576,49 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               </button>
             ))}
           </div>
+
+          {chartMode === 'TRADING_VIEW' && (
+            <>
+              <button
+                type="button"
+                onClick={() => setTvShowWatchlist((v) => !v)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  tvShowWatchlist
+                    ? 'bg-blue-50 dark:bg-sky-500/15 border-blue-200 dark:border-sky-500/35 text-blue-700 dark:text-sky-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Watchlist</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTvShowDetails((v) => !v)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  tvShowDetails
+                    ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-200 dark:border-emerald-500/35 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Details</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setTvShowCalendar((v) => !v)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  tvShowCalendar
+                    ? 'bg-amber-50 dark:bg-amber-500/15 border-amber-200 dark:border-amber-500/35 text-amber-700 dark:text-amber-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>Calendar</span>
+              </button>
+            </>
+          )}
 
           {chartMode === 'MY_TRADE_LIVE' && (
             <>
@@ -1567,8 +1765,83 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         </div>
       </div>
 
-      {/* Institutional One-Click Quick-Trade Bar (Bid / Spread / Ask + 1-Click SELL/BUY + Alert) */}
-      {onQuickOrder && quote?.available && typeof quote.price === 'number' && (
+      {/* Custom Drawing Tools Strip (shown in My Trade Live mode; TradingView Pro uses its own full native left drawing sidebar) */}
+      {chartMode === 'MY_TRADE_LIVE' && (
+        <div className="px-4 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0B1424]/70 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mr-1.5">
+              Draw:
+            </span>
+            {(
+              [
+                { id: 'CROSSHAIR', label: 'Cursor', icon: Crosshair, tip: 'Pan & Zoom Cursor' },
+                { id: 'TRENDLINE', label: 'Trend Line', icon: TrendingUp, tip: 'Draw Trend Line (2 points)' },
+                { id: 'RAY', label: 'Ray', icon: ArrowUpRight, tip: 'Draw Extended Trend Ray (projects right)' },
+                { id: 'FIBONACCI', label: 'Fibonacci', icon: AlignJustify, tip: 'Fibonacci Retracement (0% - 100% + 61.8% Golden Pocket)' },
+                { id: 'HLINE', label: 'H-Line', icon: Minus, tip: 'Horizontal Support / Resistance Line' },
+                { id: 'RECTANGLE', label: 'Zone', icon: Square, tip: 'Supply / Demand Rectangle Zone' },
+                { id: 'MEASURE', label: 'Ruler', icon: Ruler, tip: 'Price & Bar Range Ruler' },
+              ] as const
+            ).map((tool) => {
+              const Icon = tool.icon;
+              const active = activeTool === tool.id;
+              return (
+                <button
+                  key={tool.id}
+                  type="button"
+                  title={tool.tip}
+                  onClick={() => selectDrawingTool(tool.id)}
+                  className={`inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                    active
+                      ? tool.id === 'FIBONACCI'
+                        ? 'bg-amber-600 dark:bg-amber-500 border-amber-600 dark:border-amber-500 text-white dark:text-slate-950 font-semibold'
+                        : 'bg-blue-700 dark:bg-sky-500 border-blue-700 dark:border-sky-500 text-white dark:text-slate-950 font-semibold'
+                      : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white hover:border-slate-300 dark:hover:border-slate-700'
+                  }`}
+                >
+                  <Icon className="w-3 h-3" />
+                  <span>{tool.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            {drawings.length > 0 && (
+              <span className="text-[11px] font-mono-tabular text-slate-500 dark:text-slate-400 mr-1">
+                {drawings.length} saved
+              </span>
+            )}
+            <button
+              type="button"
+              disabled={drawings.length === 0}
+              onClick={() => setDrawings((prev) => prev.slice(0, -1))}
+              title="Undo Last Drawing"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 dark:border-slate-800 bg-[#F4F6FA] dark:bg-[#08101E] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white disabled:opacity-35 disabled:pointer-events-none transition-colors"
+            >
+              <Undo2 className="w-3 h-3" />
+              <span>Undo</span>
+            </button>
+            <button
+              type="button"
+              disabled={drawings.length === 0}
+              onClick={() => {
+                setDrawings([]);
+                setPendingPoint(null);
+                setPreviewPoint(null);
+              }}
+              title="Clear All Drawings"
+              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-medium rounded-md border border-slate-200 dark:border-slate-800 bg-[#F4F6FA] dark:bg-[#08101E] text-slate-600 dark:text-slate-300 hover:text-rose-700 dark:hover:text-rose-400 disabled:opacity-35 disabled:pointer-events-none transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Clear</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Institutional One-Click Quick-Trade Bar OR Symmetrical Secondary MTF Strip */}
+      {onQuickOrder && quote?.available && typeof quote.price === 'number' ? (
         <div className="px-4 py-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0E182A] flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <button
@@ -1651,21 +1924,24 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             )}
           </div>
         </div>
-      )}
+      ) : secondaryStrip ? (
+        secondaryStrip
+      ) : null}
 
       {/* Main Chart Surface */}
       {chartMode === 'TRADING_VIEW' ? (
         <div
           className={`w-full bg-white dark:bg-[#0B1424] ${
-            isExpanded ? 'flex-1 min-h-0' : 'h-[490px]'
+            isExpanded ? 'flex-1 min-h-0' : compact ? 'h-[620px]' : 'h-[700px]'
           }`}
         >
-          <iframe
-            key={`${instrument.id}-${timeframe}`}
-            src={tvEmbedUrl}
-            title={`${instrument.symbol} TradingView Chart`}
-            className="w-full h-full border-0"
-            allow="fullscreen"
+          <TradingViewAdvancedEmbed
+            symbol={instrument.tradingViewSymbol}
+            interval={tvInterval}
+            theme={isDark ? 'dark' : 'light'}
+            showDetails={tvShowDetails}
+            showWatchlist={tvShowWatchlist}
+            showCalendar={tvShowCalendar}
           />
         </div>
       ) : loading && !quote ? (
@@ -1715,11 +1991,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             <div className="flex flex-col items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTool('CROSSHAIR');
-                  setPendingPoint(null);
-                  setPreviewPoint(null);
-                }}
+                onClick={() => selectDrawingTool('CROSSHAIR')}
                 title="Crosshair / Pan & Scroll Zoom"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'CROSSHAIR'
@@ -1732,11 +2004,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTool('TRENDLINE');
-                  setPendingPoint(null);
-                  setPreviewPoint(null);
-                }}
+                onClick={() => selectDrawingTool('TRENDLINE')}
                 title="Trend Line (Click 2 points)"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'TRENDLINE'
@@ -1749,11 +2017,33 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTool('HLINE');
-                  setPendingPoint(null);
-                  setPreviewPoint(null);
-                }}
+                onClick={() => selectDrawingTool('RAY')}
+                title="Extended Trend Ray (Projects forward)"
+                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                  activeTool === 'RAY'
+                    ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
+                }`}
+              >
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => selectDrawingTool('FIBONACCI')}
+                title="Fibonacci Retracement (Click Swing 1 & Swing 2)"
+                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                  activeTool === 'FIBONACCI'
+                    ? 'bg-amber-600 dark:bg-amber-500 text-white dark:text-slate-950'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
+                }`}
+              >
+                <AlignJustify className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => selectDrawingTool('HLINE')}
                 title="Horizontal Price Line (Click chart)"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'HLINE'
@@ -1766,11 +2056,20 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
               <button
                 type="button"
-                onClick={() => {
-                  setActiveTool('MEASURE');
-                  setPendingPoint(null);
-                  setPreviewPoint(null);
-                }}
+                onClick={() => selectDrawingTool('RECTANGLE')}
+                title="Supply / Demand Zone Box (Click 2 corners)"
+                className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
+                  activeTool === 'RECTANGLE'
+                    ? 'bg-blue-700 dark:bg-sky-500 text-white dark:text-slate-950'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/[0.06]'
+                }`}
+              >
+                <Square className="w-4 h-4" />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => selectDrawingTool('MEASURE')}
                 title="Price & Bar Range Ruler (Click 2 points)"
                 className={`w-8 h-8 flex items-center justify-center rounded-lg transition-colors ${
                   activeTool === 'MEASURE'
@@ -1843,15 +2142,27 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             {/* Active Drawing Tool Helper Prompt */}
             {activeTool !== 'CROSSHAIR' && (
               <div className="pointer-events-none absolute bottom-3 left-3 z-20 bg-white/95 dark:bg-[#0E182A]/95 border border-blue-300 dark:border-sky-500/40 rounded-md px-2.5 py-1 text-[11px] text-slate-900 dark:text-slate-100">
-                {activeTool === 'HLINE' && 'Click chart to place horizontal level · Press Esc to exit'}
+                {activeTool === 'HLINE' && 'Horizontal Line: Click chart to place price level · Press Esc to exit'}
                 {activeTool === 'TRENDLINE' &&
                   (pendingPoint
-                    ? 'Click second point to complete trendline · Press Esc to cancel'
-                    : 'Click first anchor point for trendline · Press Esc to exit')}
+                    ? 'Trend Line: Click second anchor point to finish · Press Esc to cancel'
+                    : 'Trend Line: Click first anchor point · Press Esc to exit')}
+                {activeTool === 'RAY' &&
+                  (pendingPoint
+                    ? 'Extended Ray: Click second point to project forward · Press Esc to cancel'
+                    : 'Extended Ray: Click starting anchor point · Press Esc to exit')}
+                {activeTool === 'FIBONACCI' &&
+                  (pendingPoint
+                    ? 'Fibonacci Retracement: Click Swing Point 2 (End of impulse) · Press Esc to cancel'
+                    : 'Fibonacci Retracement: Click Swing Point 1 (Start of impulse) · Press Esc to exit')}
+                {activeTool === 'RECTANGLE' &&
+                  (pendingPoint
+                    ? 'Supply / Demand Zone: Click opposite corner to lock zone · Press Esc to cancel'
+                    : 'Supply / Demand Zone: Click first corner · Press Esc to exit')}
                 {activeTool === 'MEASURE' &&
                   (pendingPoint
-                    ? 'Click target price/bar to finish range measurement · Press Esc to cancel'
-                    : 'Click starting bar/price to measure move % · Press Esc to exit')}
+                    ? 'Ruler: Click target price/bar to finish range measurement · Press Esc to cancel'
+                    : 'Ruler: Click starting bar/price to measure move % · Press Esc to exit')}
               </div>
             )}
 
@@ -1892,6 +2203,148 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                   );
                 }
 
+                if (d.kind === 'RAY') {
+                  const rayStroke = isDark ? '#34D399' : '#047857';
+                  const dx = b.x - a.x;
+                  const dy = b.y - a.y;
+                  const canvasWidth = containerRef.current?.clientWidth ?? 1600;
+                  let endX = b.x;
+                  let endY = b.y;
+                  if (Math.abs(dx) > 0.5) {
+                    const targetX = dx >= 0 ? Math.max(canvasWidth, b.x) : 0;
+                    const t = (targetX - a.x) / dx;
+                    endX = a.x + dx * Math.max(t, 1);
+                    endY = a.y + dy * Math.max(t, 1);
+                  }
+                  return (
+                    <g key={d.id}>
+                      <line
+                        x1={a.x}
+                        y1={a.y}
+                        x2={endX}
+                        y2={endY}
+                        stroke={rayStroke}
+                        strokeWidth={2}
+                      />
+                      <circle cx={a.x} cy={a.y} r={3.5} fill={rayStroke} />
+                      <circle cx={b.x} cy={b.y} r={3.5} fill={rayStroke} />
+                    </g>
+                  );
+                }
+
+                if (d.kind === 'FIBONACCI') {
+                  const leftX = Math.min(a.x, b.x);
+                  const rightX = Math.max(a.x, b.x, leftX + 120);
+                  const width = Math.max(rightX - leftX, 120);
+                  const levels = FIB_LEVELS.map((lvl) => {
+                    const price = d.p2.price + (d.p1.price - d.p2.price) * lvl.ratio;
+                    const y = priceToY(price);
+                    return { ...lvl, price, y };
+                  }).filter((lvl): lvl is typeof lvl & { y: number } => lvl.y !== null);
+
+                  return (
+                    <g key={d.id}>
+                      {/* Shaded Fibonacci Zone Bands */}
+                      {levels.slice(0, -1).map((lvl, idx) => {
+                        const next = levels[idx + 1];
+                        const bandY = Math.min(lvl.y, next.y);
+                        const bandH = Math.abs(next.y - lvl.y);
+                        return (
+                          <rect
+                            key={`${d.id}-band-${lvl.ratio}`}
+                            x={leftX}
+                            y={bandY}
+                            width={width}
+                            height={bandH}
+                            fill={lvl.band}
+                          />
+                        );
+                      })}
+                      {/* Impulse Diagonal Connector */}
+                      <line
+                        x1={a.x}
+                        y1={a.y}
+                        x2={b.x}
+                        y2={b.y}
+                        stroke={isDark ? 'rgba(226,232,240,0.45)' : 'rgba(51,65,85,0.45)'}
+                        strokeWidth={1.2}
+                        strokeDasharray="4 3"
+                      />
+                      {/* Horizontal Fibonacci Retracement Levels + Labels */}
+                      {levels.map((lvl) => {
+                        const isGolden = lvl.ratio === 0.618;
+                        return (
+                          <g key={`${d.id}-lvl-${lvl.ratio}`}>
+                            <line
+                              x1={leftX}
+                              y1={lvl.y}
+                              x2={rightX}
+                              y2={lvl.y}
+                              stroke={lvl.color}
+                              strokeWidth={isGolden ? 1.8 : 1.15}
+                            />
+                            <rect
+                              x={rightX - 118}
+                              y={lvl.y - 13}
+                              width={116}
+                              height={14}
+                              rx={3}
+                              fill={isDark ? 'rgba(11, 20, 36, 0.90)' : 'rgba(255, 255, 255, 0.92)'}
+                              stroke={lvl.color}
+                              strokeWidth={0.6}
+                            />
+                            <text
+                              x={rightX - 113}
+                              y={lvl.y - 3}
+                              fill={lvl.color}
+                              fontSize="9.5"
+                              fontWeight={isGolden ? '700' : '500'}
+                              fontFamily="'JetBrains Mono', monospace"
+                            >
+                              {`${lvl.label} · ${formatPrice(lvl.price)}`}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      <circle cx={a.x} cy={a.y} r={3.5} fill="#F59E0B" />
+                      <circle cx={b.x} cy={b.y} r={3.5} fill="#F59E0B" />
+                    </g>
+                  );
+                }
+
+                if (d.kind === 'RECTANGLE') {
+                  const minX = Math.min(a.x, b.x);
+                  const minY = Math.min(a.y, b.y);
+                  const w = Math.abs(b.x - a.x);
+                  const h = Math.abs(b.y - a.y);
+                  const hiPrice = Math.max(d.p1.price, d.p2.price);
+                  const loPrice = Math.min(d.p1.price, d.p2.price);
+                  const zoneColor = isDark ? '#A78BFA' : '#6D28D9';
+                  return (
+                    <g key={d.id}>
+                      <rect
+                        x={minX}
+                        y={minY}
+                        width={Math.max(w, 2)}
+                        height={Math.max(h, 2)}
+                        fill={isDark ? 'rgba(139, 92, 246, 0.14)' : 'rgba(109, 40, 217, 0.10)'}
+                        stroke={zoneColor}
+                        strokeWidth={1.4}
+                      />
+                      <text
+                        x={minX + 6}
+                        y={Math.max(12, minY + 13)}
+                        fill={zoneColor}
+                        fontSize="9.5"
+                        fontWeight="600"
+                        fontFamily="'JetBrains Mono', monospace"
+                      >
+                        {`ZONE ${formatPrice(loPrice)} – ${formatPrice(hiPrice)}`}
+                      </text>
+                    </g>
+                  );
+                }
+
                 // Measure box
                 const minX = Math.min(a.x, b.x);
                 const minY = Math.min(a.y, b.y);
@@ -1918,7 +2371,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                     <rect
                       x={minX}
                       y={Math.max(4, minY - 22)}
-                      width={164}
+                      width={168}
                       height={18}
                       rx={4}
                       fill={isDark ? '#0E182A' : '#FFFFFF'}
@@ -1943,33 +2396,83 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 const a = projectPoint(pendingPoint);
                 const b = projectPoint(previewPoint);
                 if (!a || !b) return null;
-                if (activeTool === 'TRENDLINE') {
+                if (activeTool === 'TRENDLINE' || activeTool === 'RAY') {
                   return (
                     <line
                       x1={a.x}
                       y1={a.y}
                       x2={b.x}
                       y2={b.y}
-                      stroke={isDark ? '#38BDF8' : '#1D4ED8'}
-                      strokeWidth={1.5}
+                      stroke={activeTool === 'RAY' ? '#10B981' : isDark ? '#38BDF8' : '#1D4ED8'}
+                      strokeWidth={1.6}
                       strokeDasharray="4 3"
                     />
                   );
                 }
-                if (activeTool === 'MEASURE') {
+                if (activeTool === 'FIBONACCI') {
+                  const leftX = Math.min(a.x, b.x);
+                  const rightX = Math.max(a.x, b.x, leftX + 120);
+                  return (
+                    <g opacity={0.85}>
+                      <line
+                        x1={a.x}
+                        y1={a.y}
+                        x2={b.x}
+                        y2={b.y}
+                        stroke="#F59E0B"
+                        strokeWidth={1.2}
+                        strokeDasharray="4 3"
+                      />
+                      {FIB_LEVELS.map((lvl) => {
+                        const price =
+                          previewPoint.price + (pendingPoint.price - previewPoint.price) * lvl.ratio;
+                        const y = priceToY(price);
+                        if (y === null) return null;
+                        return (
+                          <g key={`preview-fib-${lvl.ratio}`}>
+                            <line
+                              x1={leftX}
+                              y1={y}
+                              x2={rightX}
+                              y2={y}
+                              stroke={lvl.color}
+                              strokeWidth={lvl.ratio === 0.618 ? 1.6 : 1}
+                              strokeDasharray="3 3"
+                            />
+                            <text
+                              x={rightX - 108}
+                              y={y - 3}
+                              fill={lvl.color}
+                              fontSize="9.5"
+                              fontFamily="'JetBrains Mono', monospace"
+                            >
+                              {`${lvl.label} · ${formatPrice(price)}`}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </g>
+                  );
+                }
+                if (activeTool === 'RECTANGLE' || activeTool === 'MEASURE') {
                   const minX = Math.min(a.x, b.x);
                   const minY = Math.min(a.y, b.y);
                   const w = Math.abs(b.x - a.x);
                   const h = Math.abs(b.y - a.y);
+                  const strokeCol = activeTool === 'RECTANGLE' ? '#A78BFA' : '#38BDF8';
                   return (
                     <rect
                       x={minX}
                       y={minY}
                       width={Math.max(w, 1)}
                       height={Math.max(h, 1)}
-                      fill="rgba(56, 189, 248, 0.10)"
-                      stroke="#38BDF8"
-                      strokeWidth={1}
+                      fill={
+                        activeTool === 'RECTANGLE'
+                          ? 'rgba(139, 92, 246, 0.12)'
+                          : 'rgba(56, 189, 248, 0.10)'
+                      }
+                      stroke={strokeCol}
+                      strokeWidth={1.2}
                       strokeDasharray="4 3"
                     />
                   );

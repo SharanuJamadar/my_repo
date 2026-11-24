@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { AlertOctagon, ShieldAlert, X } from 'lucide-react';
 import type { GeneratedSignalPayload, StrategyConfig, TradeMode } from '../types/trading';
 
@@ -36,6 +36,17 @@ export const OrderExecutionModal: React.FC<OrderExecutionModalProps> = ({
   const [userConfirmed, setUserConfirmed] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !submitting) {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [submitting, onClose]);
 
   const slDist = Math.abs(signal.entryPrice - signal.stopLoss);
   const dir = signal.direction === 'SELL' ? -1 : 1;
@@ -98,7 +109,7 @@ export const OrderExecutionModal: React.FC<OrderExecutionModalProps> = ({
             <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/35 rounded-lg flex items-start gap-2.5 text-xs text-rose-700 dark:text-rose-300">
               <AlertOctagon className="w-4 h-4 shrink-0 mt-0.5" />
               <span>
-                Emergency Kill Switch is ACTIVE. Disable it in Admin Settings before executing any orders.
+                Emergency Kill Switch is ACTIVE. Disable it in Account Settings before executing any orders.
               </span>
             </div>
           )}

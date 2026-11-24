@@ -144,6 +144,8 @@ type NavTab =
   | 'settings'
   | 'mobile';
 
+const MASTER_ADMIN_EMAIL = 'sharanu12131415@gmail.com';
+
 const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'terminal', label: 'Terminal', icon: CandlestickChart },
@@ -175,23 +177,37 @@ function parseHashRoute(hashStr: string): {
   stage: ViewStage;
   tab?: NavTab;
   instrumentId?: string;
+  accountMode?: 'LIVE' | 'DEMO';
 } | null {
   const cleaned = hashStr.replace(/^#\/?/, '').trim();
   if (!cleaned) return null;
   const parts = cleaned.split('/').filter(Boolean);
-  const head = parts[0]?.toLowerCase();
-  if (!head || head === 'landing') return { stage: 'landing' };
-  if (head === 'onboarding') return { stage: 'onboarding' };
-  if (VALID_NAV_TABS.includes(head as NavTab)) {
+  let idx = 0;
+  let accountMode: 'LIVE' | 'DEMO' | undefined;
+
+  const first = parts[0]?.toLowerCase();
+  if (!first || first === 'landing') return { stage: 'landing' };
+  if (first === 'onboarding') return { stage: 'onboarding' };
+
+  if (first === 'demo' || first === 'live') {
+    accountMode = first === 'live' ? 'LIVE' : 'DEMO';
+    idx = 1;
+    if (!parts[idx]) {
+      return { stage: 'workspace', tab: 'dashboard', accountMode };
+    }
+  }
+
+  const head = parts[idx]?.toLowerCase();
+  if (head && VALID_NAV_TABS.includes(head as NavTab)) {
     const tab = head as NavTab;
     let instrumentId: string | undefined;
-    if (tab === 'terminal' && parts[1]) {
-      const candidate = parts[1].toUpperCase();
+    if (tab === 'terminal' && parts[idx + 1]) {
+      const candidate = parts[idx + 1].toUpperCase();
       if (INSTRUMENTS.some((i) => i.id === candidate)) {
         instrumentId = candidate;
       }
     }
-    return { stage: 'workspace', tab, instrumentId };
+    return { stage: 'workspace', tab, instrumentId, accountMode };
   }
   return null;
 }
@@ -239,19 +255,14 @@ function TerminalWorkspace() {
   const [viewStage, setViewStage] = useState<ViewStage>(() => initialRoute?.stage ?? 'landing');
   const [justCompletedMode, setJustCompletedMode] = useState<'BROKER' | 'DEMO' | null>(null);
   const redirectAfterLoginRef = useRef(false);
-  const postLoginActionRef = useRef<'NONE' | 'ENTER_LIVE' | 'ENTER_DEMO'>('NONE');
+  const postLoginActionRef = useRef<'NONE' | 'ENTER_LIVE' | 'ENTER_DEMO' | 'STAY_IN_WORKSPACE'>('NONE');
+  const pendingLiveRouteRef = useRef(initialRoute?.accountMode === 'LIVE');
 
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [loginModalIntent, setLoginModalIntent] = useState<'LIVE' | 'DEMO' | 'GENERAL'>('GENERAL');
 
-  const [activeAccountType, setActiveAccountType] = useState<'LIVE' | 'DEMO'>(() => {
-    try {
-      const saved = window.localStorage.getItem(ACCOUNT_TYPE_STORAGE_KEY);
-      return saved === 'LIVE' ? 'LIVE' : 'DEMO';
-    } catch {
-      return 'DEMO';
-    }
-  });
+  // Always default strictly to DEMO until Firebase Auth confirms a user AND user explicitly enters LIVE
+  const [activeAccountType, setActiveAccountType] = useState<'LIVE' | 'DEMO'>('DEMO');
 
   const [activeTab, setActiveTab] = useState<NavTab>(() => initialRoute?.tab ?? 'dashboard');
   const [analyzerSubTab, setAnalyzerSubTab] = useState<AnalyzerSubTab>('auto-analyzer');
@@ -417,25 +428,35 @@ function TerminalWorkspace() {
     }
   }, [soundAlertsEnabled]);
 
-  // URL hash sync so refresh preserves workspace view and browser Back/Forward works cleanly
+  // URL hash sync so refresh preserves exact account mode (#/demo/... vs #/live/...) and Back/Forward works cleanly
   useEffect(() => {
+    const modePrefix = activeAccountType === 'LIVE' ? 'live' : 'demo';
     const nextHash =
       viewStage === 'landing'
         ? '#/landing'
         : viewStage === 'onboarding'
           ? '#/onboarding'
           : activeTab === 'terminal'
-            ? `#/terminal/${selectedInstrumentId}`
-            : `#/${activeTab}`;
+            ? `#/${modePrefix}/terminal/${selectedInstrumentId}`
+            : `#/${modePrefix}/${activeTab}`;
     if (window.location.hash !== nextHash) {
       window.history.replaceState(null, '', nextHash);
     }
-  }, [viewStage, activeTab, selectedInstrumentId]);
+  }, [viewStage, activeTab, selectedInstrumentId, activeAccountType]);
 
   useEffect(() => {
     const onHashChange = () => {
       const parsed = parseHashRoute(window.location.hash);
       if (!parsed) return;
+      if (parsed.accountMode === 'LIVE') {
+        if (auth.currentUser) {
+          setActiveAccountType('LIVE');
+        } else {
+          setActiveAccountType('DEMO');
+        }
+      } else if (parsed.accountMode === 'DEMO') {
+        setActiveAccountType('DEMO');
+      }
       setViewStage(parsed.stage);
       if (parsed.tab) setActiveTab(parsed.tab);
       if (parsed.instrumentId) setSelectedInstrumentId(parsed.instrumentId);
@@ -444,17 +465,20 @@ function TerminalWorkspace() {
     return () => window.removeEventListener('hashchange', onHashChange);
   }, []);
 
-  // Global Ctrl+K / Cmd+K Quick-Jump Command Palette shortcut
+  // Global Ctrl+K / Cmd+K Quick-Jump Command Palette shortcut (disabled on onboarding or overlapping modals)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        if (viewStage === 'onboarding' || loginModalOpen || brokerModalOpen || Boolean(orderModalSignal)) {
+          return;
+        }
         e.preventDefault();
         setCommandPaletteOpen((v) => !v);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [viewStage, loginModalOpen, brokerModalOpen, orderModalSignal]);
 
   // Real Firebase Google Auth subscription; guest users are strictly locked to DEMO mode
   useEffect(() => {
@@ -471,37 +495,60 @@ function TerminalWorkspace() {
         if (postLoginActionRef.current === 'ENTER_LIVE') {
           postLoginActionRef.current = 'NONE';
           redirectAfterLoginRef.current = false;
+          pendingLiveRouteRef.current = false;
           setActiveAccountType('LIVE');
           setActiveTab('dashboard');
           setViewStage('workspace');
+          pushToast('Actual Account Active', `Signed in as ${u.email || 'verified trader'} (LIVE mode).`, 'emerald');
         } else if (postLoginActionRef.current === 'ENTER_DEMO') {
           postLoginActionRef.current = 'NONE';
           redirectAfterLoginRef.current = false;
+          pendingLiveRouteRef.current = false;
           setActiveAccountType('DEMO');
           setActiveTab('dashboard');
           setViewStage('workspace');
+          pushToast('Demo Account Synced', `Signed in as ${u.email || 'trader'} in isolated Demo mode.`, 'blue');
+        } else if (postLoginActionRef.current === 'STAY_IN_WORKSPACE') {
+          postLoginActionRef.current = 'NONE';
+          redirectAfterLoginRef.current = false;
+          pendingLiveRouteRef.current = false;
+          pushToast('Google Cloud Sync Active', `Connected ${u.email || 'your account'} without leaving your workspace.`, 'emerald');
+        } else if (pendingLiveRouteRef.current) {
+          pendingLiveRouteRef.current = false;
+          setActiveAccountType('LIVE');
         }
       } else {
+        pendingLiveRouteRef.current = false;
         setActiveAccountType('DEMO');
         setLiveBrokerBalance(null);
       }
     });
     return () => unsub();
-  }, []);
+  }, [pushToast]);
 
-  // Fetch server integration & broker readiness (non-secret booleans)
-  useEffect(() => {
+  // Fetch server integration & broker readiness (non-secret booleans + active OAuth sessions)
+  const refreshBrokerAndIntegrationStatus = useCallback(() => {
     fetch('/api/integrations/status')
       .then((r) => r.json())
       .then((d) => setIntegrationStatus(d))
       .catch(() => {});
-    fetch('/api/brokers/status')
+    authFetch('/api/brokers/status')
       .then((r) => r.json())
       .then((d) => {
         if (d?.brokers) setBrokerReadiness(d.brokers);
+        if (typeof d?.anyLiveBrokerConfigured === 'boolean') {
+          setIntegrationStatus((prev) => ({
+            ...prev,
+            brokerConfigured: d.anyLiveBrokerConfigured,
+          }));
+        }
       })
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    refreshBrokerAndIntegrationStatus();
+  }, [refreshBrokerAndIntegrationStatus, user?.uid]);
 
   // Fetch Global Market Sessions & High-Impact Economic Calendar (initial + 60s refresh)
   const refreshEconomicCalendar = useCallback(async () => {
@@ -1366,6 +1413,10 @@ function TerminalWorkspace() {
     } else if (intent === 'DEMO') {
       postLoginActionRef.current = 'ENTER_DEMO';
       redirectAfterLoginRef.current = false;
+    } else if (viewStage === 'workspace') {
+      // Signing in from inside workspace keeps the trader in their current Demo/Live desk
+      postLoginActionRef.current = 'STAY_IN_WORKSPACE';
+      redirectAfterLoginRef.current = false;
     } else {
       postLoginActionRef.current = 'NONE';
       redirectAfterLoginRef.current = true;
@@ -1379,6 +1430,15 @@ function TerminalWorkspace() {
     } finally {
       setAuthLoading(false);
     }
+  };
+
+  const handleSignOut = async () => {
+    await signOutUser();
+    setActiveAccountType('DEMO');
+    setJustCompletedMode(null);
+    setLiveBrokerBalance(null);
+    setViewStage('landing');
+    pushToast('Signed Out', 'Session closed. Demo Account remains available anytime.', 'blue');
   };
 
   const handleSwitchAccountType = (next: 'LIVE' | 'DEMO') => {
@@ -1401,6 +1461,7 @@ function TerminalWorkspace() {
   };
 
   const handleEnterDemoAccount = () => {
+    setLoginModalOpen(false);
     setActiveAccountType('DEMO');
     setActiveTab('dashboard');
     setViewStage('workspace');
@@ -1431,16 +1492,19 @@ function TerminalWorkspace() {
         saveAccountSettings(user.uid, nextProfile),
         saveStrategyConfig(user.uid, nextConfig),
       ]);
+      setJustCompletedMode('BROKER');
+      setActiveAccountType('LIVE');
+      setActiveTab('dashboard');
+      setViewStage('workspace');
+      pushToast('Actual Account Ready', `Bound to ${params.brokerProviderLabel}.`, 'emerald');
     } else {
       setAccountProfile(saveLocalAccountProfile(nextProfile));
       setConfig(saveLocalConfig(nextConfig));
+      setJustCompletedMode('BROKER');
+      setActiveAccountType('DEMO');
+      setViewStage('landing');
+      handleOpenLoginModal('LIVE');
     }
-
-    setJustCompletedMode('BROKER');
-    if (user) {
-      setActiveAccountType('LIVE');
-    }
-    setViewStage('landing');
   };
 
   const handleCreateDemoOnboarding = async (params: {
@@ -1486,7 +1550,13 @@ function TerminalWorkspace() {
     setTimeframe(params.defaultTimeframe);
     setActiveAccountType('DEMO');
     setJustCompletedMode('DEMO');
-    setViewStage('landing');
+    setActiveTab('dashboard');
+    setViewStage('workspace');
+    pushToast(
+      'Demo Account Created',
+      `Isolated Demo workspace ready with ${params.startingCapital.toLocaleString()} virtual balance.`,
+      'blue'
+    );
   };
 
   const handleDispatchTelegram = async (payload: {
@@ -2304,32 +2374,52 @@ function TerminalWorkspace() {
       authError={authError}
       intent={loginModalIntent}
       onClose={() => setLoginModalOpen(false)}
-      onGoogleSignIn={() => handleSignIn(loginModalIntent)}
-      onContinueDemoGuest={() => {
-        setLoginModalOpen(false);
-        setActiveAccountType('DEMO');
-        setActiveTab('dashboard');
-        setViewStage('workspace');
-      }}
+      onGoogleSignIn={(targetMode) => handleSignIn(targetMode)}
+      onContinueDemoGuest={handleEnterDemoAccount}
     />
   );
+
+  const isMasterAdmin = Boolean(
+    user?.email && user.email.trim().toLowerCase() === MASTER_ADMIN_EMAIL
+  );
+
+  const visibleNavItems = useMemo(
+    () => (isMasterAdmin ? NAV_ITEMS : NAV_ITEMS.filter((item) => item.id !== 'settings')),
+    [isMasterAdmin]
+  );
+
+  useEffect(() => {
+    if (activeTab === 'settings' && !isMasterAdmin) {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, isMasterAdmin]);
 
   const commandPaletteElement = (
     <CommandPaletteModal
       open={commandPaletteOpen}
       isDark={isDark}
       activeAccountType={activeAccountType}
+      isMasterAdmin={isMasterAdmin}
       onClose={() => setCommandPaletteOpen(false)}
       onSelectInstrument={(instrumentId) => {
+        if (viewStage === 'landing') {
+          setActiveAccountType('DEMO');
+        }
         setSelectedInstrumentId(instrumentId);
         setActiveTab('terminal');
         setViewStage('workspace');
       }}
       onNavigateTab={(tab) => {
+        if (tab === 'settings' && !isMasterAdmin) return;
+        if (viewStage === 'landing') {
+          setActiveAccountType('DEMO');
+        }
         setActiveTab(tab);
         setViewStage('workspace');
       }}
       onSwitchAccountType={handleSwitchAccountType}
+      onEnterDemoAccount={handleEnterDemoAccount}
+      onEnterActualAccount={handleEnterActualAccount}
       onToggleTheme={toggleTheme}
     />
   );
@@ -2347,10 +2437,7 @@ function TerminalWorkspace() {
           onConnectBrokerAccount={handleConnectBrokerOnboarding}
           onCreateDemoAccount={handleCreateDemoOnboarding}
           onBackToLanding={() => setViewStage('landing')}
-          onSignOut={async () => {
-            await signOutUser();
-            setViewStage('landing');
-          }}
+          onSignOut={handleSignOut}
         />
         {authModalElement}
       </>
@@ -2371,7 +2458,7 @@ function TerminalWorkspace() {
           authError={authError}
           onDismissAuthError={() => setAuthError(null)}
           onOpenLoginModal={handleOpenLoginModal}
-          onSignOut={signOutUser}
+          onSignOut={handleSignOut}
           onStartOnboarding={() => {
             setJustCompletedMode(null);
             setViewStage('onboarding');
@@ -2382,15 +2469,19 @@ function TerminalWorkspace() {
             if (instrumentId) {
               setSelectedInstrumentId(instrumentId);
             }
+            // Landing chart/ticker previews strictly enter isolated Demo Account — never Real/Live accidentally
+            setActiveAccountType('DEMO');
             setActiveTab('terminal');
             setViewStage('workspace');
           }}
           onEnterAutoAnalyzer={() => {
+            setActiveAccountType('DEMO');
             setAnalyzerSubTab('auto-analyzer');
             setActiveTab('analyzer');
             setViewStage('workspace');
           }}
           onEnterPineBot={() => {
+            setActiveAccountType('DEMO');
             setAnalyzerSubTab('pine-bot');
             setActiveTab('analyzer');
             setViewStage('workspace');
@@ -2468,7 +2559,7 @@ function TerminalWorkspace() {
           {user ? (
             <button
               type="button"
-              onClick={signOutUser}
+              onClick={() => void handleSignOut()}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -2477,7 +2568,7 @@ function TerminalWorkspace() {
           ) : (
             <button
               type="button"
-              onClick={() => handleOpenLoginModal('GENERAL')}
+              onClick={() => handleOpenLoginModal(activeAccountType === 'DEMO' ? 'DEMO' : 'GENERAL')}
               className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-slate-100 dark:bg-[#152238] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               <LogIn className="w-3.5 h-3.5 text-emerald-700 dark:text-emerald-400" />
@@ -2573,7 +2664,7 @@ function TerminalWorkspace() {
           </button>
 
           <div className="space-y-1">
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
               return (
@@ -2641,7 +2732,7 @@ function TerminalWorkspace() {
         </aside>
 
         {/* Main Workspace Content */}
-        <main className="flex-1 min-w-0 p-4 pb-20 lg:p-6 lg:pb-6 max-w-[1440px]">
+        <main className="flex-1 min-w-0 w-full p-4 pb-20 lg:p-5 lg:pb-6">
           {activeTab === 'dashboard' && (
             <DashboardView
               accountType={activeAccountType}
@@ -2869,7 +2960,7 @@ function TerminalWorkspace() {
             />
           )}
 
-          {activeTab === 'settings' && (
+          {activeTab === 'settings' && isMasterAdmin && (
             <AdminSettingsView
               config={config}
               userEmail={user?.email || ''}
@@ -2959,6 +3050,13 @@ function TerminalWorkspace() {
           currentBrokerLabel={config.brokerProviderLabel}
           brokerReadiness={brokerReadiness}
           onClose={() => setBrokerModalOpen(false)}
+          onConnectionsUpdated={(nextReadiness) => {
+            setBrokerReadiness(nextReadiness);
+            const anyLive = Object.entries(nextReadiness).some(
+              ([k, v]) => k !== 'PAPER_ENGINE' && Boolean(v)
+            );
+            setIntegrationStatus((prev) => ({ ...prev, brokerConfigured: anyLive }));
+          }}
           onSelectBroker={async (brokerProviderLabel) => {
             const { userId: _u, updatedAt: _t, ...rest } = config;
             const next = { ...rest, brokerProviderLabel: brokerProviderLabel.slice(0, 80) };
@@ -2967,6 +3065,7 @@ function TerminalWorkspace() {
             } else {
               setConfig(saveLocalConfig(next));
             }
+            pushToast('Trading App Connected', `Active desk bound to ${brokerProviderLabel}`, 'emerald');
           }}
         />
       )}

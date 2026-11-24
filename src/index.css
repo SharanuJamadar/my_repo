@@ -44,6 +44,19 @@
     font-family: 'Playfair Display', Georgia, serif;
   }
 
+  .font-landing-display {
+    font-family: 'Space Grotesk', 'Outfit', sans-serif;
+  }
+
+  .font-landing-body {
+    font-family: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  .font-landing-mono {
+    font-family: 'IBM Plex Mono', 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    font-variant-numeric: tabular-nums;
+  }
+
   .font-mono-tabular {
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
     font-variant-numeric: tabular-nums;
@@ -104,3 +117,31 @@
 .dark ::-webkit-scrollbar-thumb:hover {
   background: #334a6e;
 }
+
+/* Redesigned Landing Page Architectural Grid & Ambient Illumination */
+.landing-arch-grid {
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.045) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.dark .landing-arch-grid {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 64px 64px;
+}
+
+.landing-hero-glow {
+  background-image:
+    radial-gradient(ellipse 72% 48% at 50% -8%, rgba(4, 120, 87, 0.11), transparent 72%),
+    radial-gradient(ellipse 46% 36% at 88% 12%, rgba(180, 83, 9, 0.08), transparent 68%);
+}
+
+.dark .landing-hero-glow {
+  background-image:
+    radial-gradient(ellipse 75% 52% at 50% -10%, rgba(16, 185, 129, 0.15), transparent 72%),
+    radial-gradient(ellipse 48% 38% at 86% 10%, rgba(217, 119, 6, 0.09), transparent 68%);
+}
+
