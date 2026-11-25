@@ -229,6 +229,7 @@ export interface TradeJournalEntry {
 }
 
 export interface TradeTrailState {
+  initialSl?: number;
   currentSl: number;
   tpStage: 0 | 1 | 2;
   target1: number;

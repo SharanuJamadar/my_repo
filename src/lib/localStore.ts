@@ -450,6 +450,7 @@ export function loadLocalPineStrategies(): PineStrategyRecord[] {
       'SHARAN EMA 9/20 Crossover + VWAP + RSI',
       'Crude Oil / Gold EMA 9 Price Breakout',
       'Crypto / Index MACD + EMA 50 Trend Bot',
+      'MR_X EMA 9-15-200 Reversal',
     ]);
     let changed = false;
     const upgraded = saved.map((s) => {
@@ -479,7 +480,7 @@ export function loadLocalPineStrategies(): PineStrategyRecord[] {
       return s;
     });
 
-    // Auto-append any newly added built-in templates (e.g., MR_X EMA 9-15-200 Reversal)
+    // Auto-append any newly added built-in templates (e.g., MRX - EMA 9/15/30 Continuous Strategy)
     const seededAll = buildSeeded();
     for (const candidate of seededAll) {
       const alreadyExists = upgraded.some(

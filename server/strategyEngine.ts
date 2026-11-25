@@ -792,7 +792,8 @@ export function evaluateMultiTimeframeStrategy(params: {
     stopLoss = roundPrice(Math.max(0, entryPrice - risk));
     invalidationLevel = roundPrice(Math.max(0, stopLoss - atr * 0.3));
 
-    // Anchor targets to higher-timeframe / immediate structural liquidity levels above entry
+    // Keep TP1 & TP2 near the execution point for fast partial booking & BE/TP1 lock,
+    // while anchoring TP3 to the full structural liquidity/swing target above entry.
     const candidateRes = [
       eLevels.immediateResistance,
       eLevels.strongResistance,
@@ -808,18 +809,21 @@ export function evaluateMultiTimeframeStrategy(params: {
       atr * 2.0
     );
 
-    const structuralT1 = candidateRes[0] ?? entryPrice + Math.max(atr * 1.4, swingRange * 0.38);
-    const structuralT2 =
-      candidateRes.find((lvl) => lvl > structuralT1 + atr * 0.5) ??
-      Math.max(structuralT1 + atr * 0.9, tLevels.strongResistance, entryPrice + swingRange * 0.65);
-    const structuralT3 = Math.max(
-      structuralT2 + atr * 1.0,
-      entryPrice + swingRange * 1.0
+    const structuralRoom =
+      candidateRes.length > 0
+        ? Math.max(...candidateRes) - entryPrice
+        : Math.max(swingRange * 1.15, risk * 3.5);
+
+    const tp3Dist = Math.min(structuralRoom, Math.max(risk * 4.5, swingRange * 1.25));
+    const tp1Dist = Math.min(risk * 0.75, Math.max(atr * 0.35, tp3Dist * 0.3));
+    const tp2Dist = Math.max(
+      tp1Dist + Math.min(atr * 0.35, Math.max(0, (tp3Dist - tp1Dist) * 0.4)),
+      Math.min(risk * 1.4, tp3Dist * 0.55)
     );
 
-    target1 = roundPrice(structuralT1);
-    target2 = roundPrice(structuralT2);
-    target3 = roundPrice(structuralT3);
+    target1 = roundPrice(entryPrice + tp1Dist);
+    target2 = roundPrice(entryPrice + Math.min(tp2Dist, tp3Dist * 0.75));
+    target3 = roundPrice(entryPrice + Math.max(tp3Dist, tp2Dist));
   } else if (candidateDirection === 'SELL') {
     const distToBreakdown = spotPrice - eLevels.breakdownLevel;
     if (distToBreakdown > atr * 0.35 && distToBreakdown <= atr * 1.25) {
@@ -852,27 +856,26 @@ export function evaluateMultiTimeframeStrategy(params: {
       atr * 2.0
     );
 
-    const structuralT1 =
-      candidateSup[0] ?? Math.max(0, entryPrice - Math.max(atr * 1.4, swingRange * 0.38));
-    const structuralT2 =
-      candidateSup.find((lvl) => lvl < structuralT1 - atr * 0.5) ??
-      Math.max(
-        0,
-        Math.min(structuralT1 - atr * 0.9, tLevels.strongSupport, entryPrice - swingRange * 0.65)
-      );
-    const structuralT3 = Math.max(
-      0,
-      Math.min(structuralT2 - atr * 1.0, entryPrice - swingRange * 1.0)
+    const structuralRoom =
+      candidateSup.length > 0
+        ? entryPrice - Math.min(...candidateSup)
+        : Math.max(swingRange * 1.15, risk * 3.5);
+
+    const tp3Dist = Math.min(structuralRoom, Math.max(risk * 4.5, swingRange * 1.25));
+    const tp1Dist = Math.min(risk * 0.75, Math.max(atr * 0.35, tp3Dist * 0.3));
+    const tp2Dist = Math.max(
+      tp1Dist + Math.min(atr * 0.35, Math.max(0, (tp3Dist - tp1Dist) * 0.4)),
+      Math.min(risk * 1.4, tp3Dist * 0.55)
     );
 
-    target1 = roundPrice(structuralT1);
-    target2 = roundPrice(structuralT2);
-    target3 = roundPrice(structuralT3);
+    target1 = roundPrice(Math.max(0, entryPrice - tp1Dist));
+    target2 = roundPrice(Math.max(0, entryPrice - Math.min(tp2Dist, tp3Dist * 0.75)));
+    target3 = roundPrice(Math.max(0, entryPrice - Math.max(tp3Dist, tp2Dist)));
   }
 
   const riskDist = Math.abs(entryPrice - stopLoss);
-  const reward2Dist = Math.abs(target2 - entryPrice);
-  const numericRR = riskDist > 0 ? Number((reward2Dist / riskDist).toFixed(2)) : 0;
+  const runnerRewardDist = Math.abs(target3 - entryPrice);
+  const numericRR = riskDist > 0 ? Number((runnerRewardDist / riskDist).toFixed(2)) : 0;
   const rrString = numericRR > 0 ? `1:${numericRR}` : 'N/A';
 
   const rrPass = numericRR >= config.minRiskReward;

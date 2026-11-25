@@ -20,6 +20,7 @@ import {
   type TradeTrailState,
 } from '../types/trading';
 import { JournalAnalyticsSection } from './JournalAnalyticsSection';
+import { computeTpLadderMetrics, type TpLadderMetrics } from '../lib/tpLadderProgress';
 
 interface TradeJournalViewProps {
   accountType: 'LIVE' | 'DEMO';
@@ -242,19 +243,30 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
           ? Number(((priceDiff / t.entryPrice) * 100).toFixed(2))
           : null;
 
-      const initialRisk = Math.abs(t.entryPrice - t.stopLoss);
-      const liveRMultiple =
-        priceDiff !== null && initialRisk > 0 ? Number((priceDiff / initialRisk).toFixed(2)) : null;
+      const trail = tradeProtectionMap[t.id];
+      const activeSl = trail ? trail.currentSl : t.stopLoss;
+      const tpStage = trail?.tpStage ?? t.tpStage ?? 0;
+      const tp1Val = trail?.target1 ?? t.target1;
+      const tp2Val = trail?.target2 ?? t.target2;
+      const tp3Val = trail?.target3 ?? t.target3;
 
-      // Target vs SL progress bar [0..100]
-      let targetProgressPct: number | null = null;
-      if (livePrice !== null && t.target1 > 0 && t.stopLoss > 0 && t.target1 !== t.stopLoss) {
-        const raw =
-          t.direction === 'BUY'
-            ? ((livePrice - t.stopLoss) / (t.target1 - t.stopLoss)) * 100
-            : ((t.stopLoss - livePrice) / (t.stopLoss - t.target1)) * 100;
-        targetProgressPct = Math.max(0, Math.min(100, raw));
-      }
+      const ladderMetrics: TpLadderMetrics | null =
+        livePrice !== null
+          ? computeTpLadderMetrics({
+              direction: t.direction,
+              entryPrice: t.entryPrice,
+              currentSl: activeSl,
+              initialSl: trail?.initialSl,
+              livePrice,
+              target1: tp1Val,
+              target2: tp2Val,
+              target3: tp3Val,
+              tpStage,
+              riskReward: t.riskReward,
+            })
+          : null;
+
+      const liveRMultiple = ladderMetrics?.liveRMultiple ?? null;
 
       const deployedCapital = t.entryPrice * t.quantity;
 
@@ -268,11 +280,11 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
         effectivePnl,
         roiPct,
         liveRMultiple,
-        targetProgressPct,
+        ladderMetrics,
         deployedCapital,
       };
     });
-  }, [trades, liveFeedMap, manualLtpMap]);
+  }, [trades, liveFeedMap, manualLtpMap, tradeProtectionMap]);
 
   const filteredTrades = useMemo(() => {
     return enrichedTrades.filter(({ trade: t }) => {
@@ -418,10 +430,10 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
 
     const risk = Math.abs(entry - sl);
     const dir = newDirection === 'BUY' ? 1 : -1;
-    const t2Val = Number(newT2) > 0 ? Number(newT2) : Number((entry + dir * Math.max(risk * 2.2, Math.abs(t1 - entry) * 1.6)).toFixed(4));
-    const t3Val = Number(newT3) > 0 ? Number(newT3) : Number((entry + dir * Math.max(risk * 3.2, Math.abs(t1 - entry) * 2.3)).toFixed(4));
+    const t2Val = Number(newT2) > 0 ? Number(newT2) : Number((entry + dir * Math.max(risk * 1.4, Math.abs(t1 - entry) * 1.75)).toFixed(4));
+    const t3Val = Number(newT3) > 0 ? Number(newT3) : Number((entry + dir * Math.max(risk * 3.5, Math.abs(t2Val - entry) * 2.2)).toFixed(4));
     const reward = Math.abs(t3Val - entry);
-    const rr = risk > 0 ? `1:${(reward / risk).toFixed(2)}` : '1:3';
+    const rr = risk > 0 ? `1:${(reward / risk).toFixed(2)}` : '1:3.5';
 
     await onCreateTrade({
       instrument: newInstrument,
@@ -781,7 +793,7 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
                     effectivePnl,
                     roiPct,
                     liveRMultiple,
-                    targetProgressPct,
+                    ladderMetrics,
                   }) => {
                     const isExpanded = expandedTradeId === t.id;
                     const remQty =
@@ -943,16 +955,47 @@ export const TradeJournalView: React.FC<TradeJournalViewProps> = ({
                                 </span>
                               </div>
 
-                              {targetProgressPct !== null && t.status === 'OPEN' && (
-                                <div className="w-36 ml-auto h-1.5 bg-slate-200 dark:bg-white/[0.08] rounded-full overflow-hidden">
+                              {ladderMetrics !== null && t.status === 'OPEN' && (
+                                <div className="w-36 ml-auto space-y-1">
                                   <div
-                                    className={`h-full transition-all duration-300 ${
-                                      tpStage > 0 || targetProgressPct >= 50
-                                        ? 'bg-emerald-500 dark:bg-emerald-400'
-                                        : 'bg-blue-600 dark:bg-sky-400'
+                                    className="relative w-full h-1.5 bg-slate-200 dark:bg-white/[0.08] rounded-full overflow-hidden"
+                                    title={ladderMetrics.statusLabel}
+                                  >
+                                    {ladderMetrics.zone === 'DRAWDOWN' ? (
+                                      <div
+                                        className="h-full bg-rose-500 dark:bg-rose-400 transition-all duration-300"
+                                        style={{ width: `${ladderMetrics.slDrawdownPct}%` }}
+                                      />
+                                    ) : (
+                                      <div
+                                        className={`h-full transition-all duration-300 ${
+                                          ladderMetrics.zone === 'ENTRY_TO_TP1'
+                                            ? 'bg-blue-600 dark:bg-sky-400'
+                                            : 'bg-emerald-500 dark:bg-emerald-400'
+                                        }`}
+                                        style={{ width: `${ladderMetrics.tpProgressPct}%` }}
+                                      />
+                                    )}
+                                    {ladderMetrics.zone !== 'DRAWDOWN' && (
+                                      <>
+                                        <span className="pointer-events-none absolute top-0 bottom-0 left-[33.33%] w-px bg-slate-400/50 dark:bg-slate-950/70" />
+                                        <span className="pointer-events-none absolute top-0 bottom-0 left-[66.67%] w-px bg-slate-400/50 dark:bg-slate-950/70" />
+                                      </>
+                                    )}
+                                  </div>
+                                  <div
+                                    className={`text-[9px] font-medium ${
+                                      ladderMetrics.zone === 'DRAWDOWN'
+                                        ? 'text-rose-600 dark:text-rose-400'
+                                        : ladderMetrics.zone === 'ENTRY_TO_TP1'
+                                          ? 'text-blue-600 dark:text-sky-400'
+                                          : ladderMetrics.zone === 'AT_ENTRY'
+                                            ? 'text-slate-500 dark:text-slate-400'
+                                            : 'text-emerald-600 dark:text-emerald-400'
                                     }`}
-                                    style={{ width: `${targetProgressPct}%` }}
-                                  />
+                                  >
+                                    {ladderMetrics.statusLabel}
+                                  </div>
                                 </div>
                               )}
                             </div>

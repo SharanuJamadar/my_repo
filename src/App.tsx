@@ -826,36 +826,43 @@ function TerminalWorkspace() {
       const isBuy = trade.direction === 'BUY';
       const dir = isBuy ? 1 : -1;
       const roundLvl = (n: number) => Number(n.toFixed(trade.entryPrice < 10 ? 4 : 2));
+      const persistedStage: 0 | 1 | 2 =
+        trade.tpStage === 2 ? 2 : trade.tpStage === 1 ? 1 : 0;
+
+      const slOnLossSide = isBuy ? trade.stopLoss < trade.entryPrice : trade.stopLoss > trade.entryPrice;
+      const existingState = tradeTrailRef.current.get(trade.id);
+      const effectiveInitialSl =
+        existingState?.initialSl ?? (persistedStage === 0 && slOnLossSide ? trade.stopLoss : undefined);
+
       const baseSlDist =
-        Math.abs(trade.entryPrice - trade.stopLoss) > 0
-          ? Math.abs(trade.entryPrice - trade.stopLoss)
-          : trade.target1
-            ? Math.abs(trade.target1 - trade.entryPrice) / 1.2
-            : 0;
+        effectiveInitialSl !== undefined
+          ? Math.abs(trade.entryPrice - effectiveInitialSl)
+          : slOnLossSide
+            ? Math.abs(trade.entryPrice - trade.stopLoss)
+            : trade.target1
+              ? Math.abs(trade.target1 - trade.entryPrice) / 0.75
+              : 0;
       if (baseSlDist <= 0) continue;
 
       const target1 =
         trade.target1 && (isBuy ? trade.target1 > trade.entryPrice : trade.target1 < trade.entryPrice)
           ? trade.target1
-          : roundLvl(trade.entryPrice + dir * baseSlDist * 1.2);
+          : roundLvl(trade.entryPrice + dir * baseSlDist * 0.75);
       const target2 =
         trade.target2 && (isBuy ? trade.target2 > target1 : trade.target2 < target1)
           ? trade.target2
-          : roundLvl(trade.entryPrice + dir * baseSlDist * 2.2);
+          : roundLvl(trade.entryPrice + dir * baseSlDist * 1.4);
       const target3 =
         trade.target3 && (isBuy ? trade.target3 > target2 : trade.target3 < target2)
           ? trade.target3
-          : roundLvl(trade.entryPrice + dir * baseSlDist * 3.2);
+          : roundLvl(trade.entryPrice + dir * baseSlDist * 3.5);
 
-      const persistedStage: 0 | 1 | 2 =
-        trade.tpStage === 2 ? 2 : trade.tpStage === 1 ? 1 : 0;
-
-      const existingState = tradeTrailRef.current.get(trade.id);
       let state: TradeTrailState;
       if (existingState) {
         state = existingState;
       } else {
         state = {
+          initialSl: effectiveInitialSl,
           currentSl: trade.stopLoss,
           tpStage: persistedStage,
           target1,
@@ -959,6 +966,7 @@ function TerminalWorkspace() {
 
       if (nextStage !== state.tpStage || nextSl !== state.currentSl) {
         state = {
+          initialSl: state.initialSl ?? effectiveInitialSl,
           currentSl: nextSl,
           tpStage: nextStage,
           target1,
@@ -1197,9 +1205,9 @@ function TerminalWorkspace() {
           executionMode: t.executionMode,
           entryPrice: t.entryPrice,
           stopLoss: t.stopLoss,
-          target1: t.target1 || roundLvl(t.entryPrice + dir * slDist * 1.5),
-          target2: t.target2 || roundLvl(t.entryPrice + dir * slDist * 2.4),
-          target3: t.target3 || roundLvl(t.entryPrice + dir * slDist * 3.4),
+          target1: t.target1 || roundLvl(t.entryPrice + dir * slDist * 0.75),
+          target2: t.target2 || roundLvl(t.entryPrice + dir * slDist * 1.4),
+          target3: t.target3 || roundLvl(t.entryPrice + dir * slDist * 3.5),
           tpStage: t.tpStage === 2 ? 2 : t.tpStage === 1 ? 1 : 0,
           quantity: t.quantity,
           remainingQuantity:
@@ -1599,8 +1607,8 @@ function TerminalWorkspace() {
     const slDist = Math.abs(signal.entryPrice - signal.stopLoss);
     const dir = signal.direction === 'BUY' ? 1 : -1;
     const roundLvl = (n: number) => Number(n.toFixed(signal.entryPrice < 10 ? 4 : 2));
-    const tp2 = signal.target2 || roundLvl(signal.entryPrice + dir * slDist * 2.2);
-    const tp3 = signal.target3 || roundLvl(signal.entryPrice + dir * slDist * 3.2);
+    const tp2 = signal.target2 || roundLvl(signal.entryPrice + dir * slDist * 1.4);
+    const tp3 = signal.target3 || roundLvl(signal.entryPrice + dir * slDist * 3.5);
 
     const tradePayload = {
       instrument: signal.instrument,
@@ -1645,8 +1653,8 @@ function TerminalWorkspace() {
     const slDist = Math.abs(orderModalSignal.entryPrice - orderModalSignal.stopLoss);
     const dir = orderModalSignal.direction === 'BUY' ? 1 : -1;
     const roundLvl = (n: number) => Number(n.toFixed(orderModalSignal.entryPrice < 10 ? 4 : 2));
-    const tp2 = orderModalSignal.target2 || roundLvl(orderModalSignal.entryPrice + dir * slDist * 2.2);
-    const tp3 = orderModalSignal.target3 || roundLvl(orderModalSignal.entryPrice + dir * slDist * 3.2);
+    const tp2 = orderModalSignal.target2 || roundLvl(orderModalSignal.entryPrice + dir * slDist * 1.4);
+    const tp3 = orderModalSignal.target3 || roundLvl(orderModalSignal.entryPrice + dir * slDist * 3.5);
 
     const signalId = `sig-${Date.now()}`;
     const res = await authFetch('/api/orders/execute', {
@@ -1778,8 +1786,8 @@ function TerminalWorkspace() {
       const slDist = Math.abs(sig.entryPrice - sig.stopLoss);
       const dir = sig.direction === 'BUY' ? 1 : -1;
       const roundLvl = (n: number) => Number(n.toFixed(sig.entryPrice < 10 ? 4 : 2));
-      const tp2 = sig.target2 || roundLvl(sig.entryPrice + dir * slDist * 2.2);
-      const tp3 = sig.target3 || roundLvl(sig.entryPrice + dir * slDist * 3.2);
+      const tp2 = sig.target2 || roundLvl(sig.entryPrice + dir * slDist * 1.4);
+      const tp3 = sig.target3 || roundLvl(sig.entryPrice + dir * slDist * 3.5);
 
       const signalId = `sig-${Date.now()}-${sig.instrument.replace(/[^A-Z0-9]/gi, '')}`;
       const brokerLabel =
@@ -1927,9 +1935,9 @@ function TerminalWorkspace() {
       const roundLvl = (n: number) => Number(n.toFixed(execPrice < 10 ? 4 : 2));
 
       const sl = roundLvl(execPrice - dir * risk);
-      const tp1 = roundLvl(execPrice + dir * risk * 1.5);
-      const tp2 = roundLvl(execPrice + dir * risk * 2.4);
-      const tp3 = roundLvl(execPrice + dir * risk * 3.4);
+      const tp1 = roundLvl(execPrice + dir * risk * 0.75);
+      const tp2 = roundLvl(execPrice + dir * risk * 1.4);
+      const tp3 = roundLvl(execPrice + dir * risk * 3.5);
 
       const quickSignal: GeneratedSignalPayload = {
         instrument: quote.instrument.symbol,
@@ -1942,7 +1950,7 @@ function TerminalWorkspace() {
         target1: tp1,
         target2: tp2,
         target3: tp3,
-        riskReward: '1:3.4',
+        riskReward: '1:3.5',
         entryTimeframe: timeframe.toUpperCase(),
         trendTimeframe: config.trendTimeframe.toUpperCase(),
         horizon: 'INTRADAY',

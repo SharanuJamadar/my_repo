@@ -342,7 +342,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const emaSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
   const mrxEma9Ref = useRef<ISeriesApi<'Line'> | null>(null);
   const mrxEma15Ref = useRef<ISeriesApi<'Line'> | null>(null);
-  const mrxEma200Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const mrxEma30Ref = useRef<ISeriesApi<'Line'> | null>(null);
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -686,22 +686,22 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
     if (showMrX) {
       mrxEma9Ref.current = chart.addSeries(LineSeries, {
-        color: '#22C55E',
+        color: '#84CC16',
         lineWidth: 2,
         priceLineVisible: false,
-        title: 'MR_X EMA 9',
+        title: 'MRX EMA 9',
       });
       mrxEma15Ref.current = chart.addSeries(LineSeries, {
         color: '#F97316',
         lineWidth: 2,
         priceLineVisible: false,
-        title: 'MR_X EMA 15',
+        title: 'MRX EMA 15',
       });
-      mrxEma200Ref.current = chart.addSeries(LineSeries, {
+      mrxEma30Ref.current = chart.addSeries(LineSeries, {
         color: '#EF4444',
         lineWidth: 2,
         priceLineVisible: false,
-        title: 'MR_X EMA 200',
+        title: 'MRX EMA 30',
       });
       emaFastRef.current = null;
       emaMidRef.current = null;
@@ -709,7 +709,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     } else if (showEmas) {
       mrxEma9Ref.current = null;
       mrxEma15Ref.current = null;
-      mrxEma200Ref.current = null;
+      mrxEma30Ref.current = null;
       emaFastRef.current = chart.addSeries(LineSeries, {
         color: '#F59E0B',
         lineWidth: 2,
@@ -731,7 +731,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     } else {
       mrxEma9Ref.current = null;
       mrxEma15Ref.current = null;
-      mrxEma200Ref.current = null;
+      mrxEma30Ref.current = null;
       emaFastRef.current = null;
       emaMidRef.current = null;
       emaSlowRef.current = null;
@@ -815,7 +815,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       emaSlowRef.current = null;
       mrxEma9Ref.current = null;
       mrxEma15Ref.current = null;
-      mrxEma200Ref.current = null;
+      mrxEma30Ref.current = null;
       vwapSeriesRef.current = null;
       chartRef.current = null;
       lastStructureKeyRef.current = '';
@@ -953,10 +953,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             if (showMrX && mrxEval) {
               const p9 = mrxEval.ema9Series[mrxEval.ema9Series.length - 1];
               const p15 = mrxEval.ema15Series[mrxEval.ema15Series.length - 1];
-              const p200 = mrxEval.ema200Series[mrxEval.ema200Series.length - 1];
+              const p30 = mrxEval.ema30Series[mrxEval.ema30Series.length - 1];
               if (p9) mrxEma9Ref.current?.update({ time: p9.time as UTCTimestamp, value: p9.value });
               if (p15) mrxEma15Ref.current?.update({ time: p15.time as UTCTimestamp, value: p15.value });
-              if (p200) mrxEma200Ref.current?.update({ time: p200.time as UTCTimestamp, value: p200.value });
+              if (p30) mrxEma30Ref.current?.update({ time: p30.time as UTCTimestamp, value: p30.value });
             } else if (showEmas) {
               const fastPts = calcEmaPoints(effectiveCandles, config.emaFast);
               const midPts = calcEmaPoints(effectiveCandles, config.emaMid);
@@ -1015,8 +1015,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         mrxEma15Ref.current?.setData(
           mrxEval.ema15Series.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
         );
-        mrxEma200Ref.current?.setData(
-          mrxEval.ema200Series.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+        mrxEma30Ref.current?.setData(
+          mrxEval.ema30Series.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
         );
       } else if (showEmas) {
         emaFastRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaFast));
@@ -1231,7 +1231,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       if (showMrX && mrxEval && mrxEval.signals.length > 0) {
         for (const sig of mrxEval.signals) {
           markers.push({
-            time: sig.time as UTCTimestamp,
+            time: sig.markerTime as UTCTimestamp,
             position: sig.direction === 'BUY' ? 'belowBar' : 'aboveBar',
             color: sig.direction === 'BUY' ? '#22C55E' : '#EF4444',
             shape: sig.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
@@ -1720,7 +1720,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               <button
                 type="button"
                 onClick={handleToggleMrX}
-                title="Switch to My Trade Live Chart with MR_X EMA 9/15/200 Reversal lines & BUY/SELL markers"
+                title="Switch to My Trade Live Chart with MRX EMA 9/15/30 Continuous Strategy lines & BUY/SELL arrows"
                 className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 ${
                   showMrX
                     ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
@@ -1728,7 +1728,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 }`}
               >
                 <TrendingUp className="w-3.5 h-3.5" />
-                <span>MR_X 9/15/200</span>
+                <span>MRX 9/15/30</span>
               </button>
             </>
           )}
@@ -1769,14 +1769,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               <button
                 type="button"
                 onClick={handleToggleMrX}
-                title="Toggle MR_X EMA 9 (Green) / EMA 15 (Orange) / EMA 200 (Red) Reversal Strategy & BUY/SELL Markers"
+                title="Toggle MRX EMA 9 (Lime) / EMA 15 (Orange) / EMA 30 (Red) Continuous Strategy & BUY/SELL Arrows"
                 className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 ${
                   showMrX
                     ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/45 text-emerald-700 dark:text-emerald-300'
                     : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
-                <span>MR_X 9/15/200</span>
+                <span>MRX 9/15/30</span>
               </button>
 
               <button

@@ -111,86 +111,59 @@ if (shortCondition)
 `,
   },
   {
-    id: 'mr-x-ema-9-15-200-reversal',
-    name: 'MR_X EMA 9-15-200 Reversal',
+    id: 'mrx-ema-9-15-30-continuous',
+    name: 'MRX - EMA 9/15/30 Continuous Strategy',
     description:
-      'Pine Script v6 EMA 9/15 crossover/crossunder reversal system filtered by EMA 200 macro trend and confirmed bar close, with automatic long/short position reversal.',
+      'Pine Script v5 continuous EMA 9/15 crossover/crossunder strategy filtered by EMA 30 trend (close > ema30 for BUY, close < ema30 for SELL) with pyramiding=0 and automatic directional flips.',
     instrumentId: 'XAUUSD',
     timeframe: '5m',
     quantity: 1,
     initialCapital: 1000,
     stopLossPct: 0.55,
-    takeProfitPct: 1.65,
+    takeProfitPct: 1.95,
     riskPerTradePct: 2.0,
     trailingStop: true,
-    pineCode: `//@version=6
-strategy("MR_X EMA 9-15-200 Reversal",
-     overlay=true,
-     initial_capital=1000,
-     pyramiding=0,
-     process_orders_on_close=true,
-     calc_on_order_fills=true)
+    pineCode: `//@version=5
+strategy("MRX - EMA 9/15/30 Continuous Strategy", overlay=true, pyramiding=0, process_orders_on_close=true)
 
-// EMA CALCULATION
-ema9   = ta.ema(close, 9)
-ema15  = ta.ema(close, 15)
-ema200 = ta.ema(close, 200)
+// === INPUTS ===
+ema9_len  = input.int(9, "EMA 9 Length")
+ema15_len = input.int(15, "EMA 15 Length")
+ema30_len = input.int(30, "EMA 30 Length")
 
-// CROSSOVER
-bullCross = ta.crossover(ema9, ema15)
-bearCross = ta.crossunder(ema9, ema15)
+// === CALCULATIONS ===
+ema9  = ta.ema(close, ema9_len)
+ema15 = ta.ema(close, ema15_len)
+ema30 = ta.ema(close, ema30_len)
 
-// BUY CONDITION
-buySignal = barstate.isconfirmed and
-     close > ema200 and
-     close > ema9 and
-     close > ema15 and
-     bullCross
+// === PLOTS ===
+plot(ema9, color=color.lime, linewidth=2, title="EMA 9")
+plot(ema15, color=color.orange, linewidth=2, title="EMA 15")
+plot(ema30, color=color.red, linewidth=2, title="EMA 30")
 
-// SELL CONDITION
-sellSignal = barstate.isconfirmed and
-     close < ema200 and
-     close < ema9 and
-     close < ema15 and
-     bearCross
+// === SIGNAL CONDITIONS ===
+buySignal = ta.crossover(ema9, ema15) and close > ema30
+sellSignal = ta.crossunder(ema9, ema15) and close < ema30
 
-// TRADE REVERSAL
-if buySignal and strategy.position_size <= 0
-    strategy.close("SELL")
+// === CONTINUOUS TRADING ===
+if buySignal
     strategy.entry("BUY", strategy.long)
 
-if sellSignal and strategy.position_size >= 0
-    strategy.close("BUY")
+if sellSignal
     strategy.entry("SELL", strategy.short)
 
-// EMA PLOTS
-plot(ema9, "EMA 9", color=color.green, linewidth=2)
-plot(ema15, "EMA 15", color=color.orange, linewidth=2)
-plot(ema200, "EMA 200", color=color.red, linewidth=2)
+// === SIGNAL ARROWS ===
+plotshape(buySignal, title="BUY", location=location.belowbar,
+     color=color.green, style=shape.triangleup, size=size.small,
+     text="BUY", offset=-1)
 
-// ONLY NEW SIGNALS
-plotshape(buySignal and strategy.position_size <= 0,
-     title="BUY",
-     style=shape.labelup,
-     location=location.belowbar,
-     color=color.green,
-     text="BUY",
-     textcolor=color.white)
+plotshape(sellSignal, title="SELL", location=location.abovebar,
+     color=color.red, style=shape.triangledown, size=size.small,
+     text="SELL", offset=-1)
 
-plotshape(sellSignal and strategy.position_size >= 0,
-     title="SELL",
-     style=shape.labeldown,
-     location=location.abovebar,
-     color=color.red,
-     text="SELL",
-     textcolor=color.white)
-
-// ALERTS
-alertcondition(buySignal and strategy.position_size <= 0,
-     "BUY Alert", "MR_X BUY Reversal")
-
-alertcondition(sellSignal and strategy.position_size >= 0,
-     "SELL Alert", "MR_X SELL Reversal")
+// === ALERTS ===
+alertcondition(buySignal, title="BUY Alert", message="MRX BUY Signal")
+alertcondition(sellSignal, title="SELL Alert", message="MRX SELL Signal")
 `,
   },
 ];

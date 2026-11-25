@@ -804,6 +804,9 @@ export function buildPineExecutionContext(
     const headerMatch = line.match(/^(?:strategy|indicator|study)\(\s*["']([^"']+)["']/);
     if (headerMatch) {
       scriptTitle = headerMatch[1];
+      if (/pyramiding\s*=\s*0\b/.test(line)) {
+        hasExplicitReversal = true;
+      }
       continue;
     }
 
@@ -1094,7 +1097,7 @@ function computePositionQuantity(params: {
   return bounded >= 10 ? Math.round(bounded) : Number(bounded.toFixed(2));
 }
 
-function computeThreeTpLevels(
+export function computeThreeTpLevels(
   side: 'BUY' | 'SELL',
   entryPrice: number,
   slPct: number,
@@ -1107,9 +1110,11 @@ function computeThreeTpLevels(
   slDist: number;
 } {
   const slDist = entryPrice * (slPct / 100);
-  const tp3Dist = Math.max(slDist * 2.4, entryPrice * (tpPct / 100));
-  const tp1Dist = Math.max(slDist * 1.0, tp3Dist * 0.42);
-  const tp2Dist = Math.max(slDist * 1.75, tp3Dist * 0.72);
+  // Keep TP1 & TP2 near the execution point for fast partial booking & BE/TP1 SL lock,
+  // and keep TP3 long according to the strategy's take-profit runner target.
+  const tp3Dist = Math.max(slDist * 3.2, entryPrice * (tpPct / 100));
+  const tp1Dist = Math.min(slDist * 0.75, tp3Dist * 0.3);
+  const tp2Dist = Math.min(slDist * 1.4, tp3Dist * 0.55);
 
   if (side === 'BUY') {
     return {
@@ -1122,9 +1127,9 @@ function computeThreeTpLevels(
   }
   return {
     stopLoss: entryPrice + slDist,
-    tp1: entryPrice - tp1Dist,
-    tp2: entryPrice - tp2Dist,
-    tp3: entryPrice - tp3Dist,
+    tp1: Math.max(0, entryPrice - tp1Dist),
+    tp2: Math.max(0, entryPrice - tp2Dist),
+    tp3: Math.max(0, entryPrice - tp3Dist),
     slDist,
   };
 }

@@ -272,4 +272,13 @@ test('evaluateMultiTimeframeStrategy computes real structural R:R and reachable 
   assert.equal(waitingSetup.direction, 'BUY');
   assert.equal(waitingSetup.status, 'WAIT');
   assert.ok(waitingSetup.entryPrice > spot);
+
+  // Verify TP1 & TP2 sit near execution point while TP3 stretches long along structural resistance
+  const risk = Math.abs(waitingSetup.entryPrice - waitingSetup.stopLoss);
+  const tp1R = (waitingSetup.target1 - waitingSetup.entryPrice) / risk;
+  const tp2R = (waitingSetup.target2 - waitingSetup.entryPrice) / risk;
+  const tp3R = ((waitingSetup.target3 ?? 0) - waitingSetup.entryPrice) / risk;
+  assert.ok(tp1R <= 0.85, `Expected TP1 near entry (<=0.85R), got ${tp1R.toFixed(2)}R`);
+  assert.ok(tp2R <= 1.5, `Expected TP2 near entry (<=1.5R), got ${tp2R.toFixed(2)}R`);
+  assert.ok(tp3R >= 3.5, `Expected TP3 long structural runner (>=3.5R), got ${tp3R.toFixed(2)}R`);
 });

@@ -194,7 +194,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
       if (!mrxEvaluation?.latest || !quote?.price) return;
       const dir: 'BUY' | 'SELL' =
         mrxEvaluation.lastSignal?.direction ??
-        (mrxEvaluation.latest.aboveEma200 ? 'BUY' : 'SELL');
+        (mrxEvaluation.latest.aboveEma30 ? 'BUY' : 'SELL');
       const payload = buildMrxSignalPayload({
         instrument: selectedInstrument,
         timeframe,
@@ -316,7 +316,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
             <button
               type="button"
               onClick={toggleMrX}
-              title="Plot MR_X EMA 9 / 15 / 200 Reversal strategy & BUY/SELL markers on the main terminal chart"
+              title="Plot MRX - EMA 9/15/30 Continuous Strategy & BUY/SELL arrows on the main terminal chart"
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
                 mrXEnabled
                   ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/45 text-emerald-700 dark:text-emerald-300'
@@ -324,7 +324,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               }`}
             >
               <TrendingUp className="w-3.5 h-3.5" />
-              <span>MR_X 9-15-200 {mrXEnabled ? 'ON' : 'OFF'}</span>
+              <span>MRX 9/15/30 {mrXEnabled ? 'ON' : 'OFF'}</span>
             </button>
 
             <button
@@ -697,14 +697,14 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
         </div>
       </div>
 
-      {/* MR_X EMA 9-15-200 Reversal Live Terminal Strategy Panel */}
+      {/* MRX - EMA 9/15/30 Continuous Strategy Live Terminal Panel */}
       {mrXEnabled && (
         <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4">
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
             <div className="flex flex-wrap items-center gap-2.5">
-              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <TrendingUp className="w-4 h-4 text-lime-600 dark:text-lime-400" />
               <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
-                MR_X EMA 9-15-200 Reversal
+                MRX - EMA 9/15/30 Continuous Strategy
               </h3>
               <span className="text-[11px] font-mono-tabular px-2 py-0.5 rounded bg-slate-100 dark:bg-[#08101E] border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
                 {selectedInstrument.symbol} · {timeframe.toUpperCase()}
@@ -739,7 +739,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-45"
               >
                 <Zap className="w-3.5 h-3.5" />
-                Execute {mrxEvaluation?.lastSignal?.direction ?? (mrxEvaluation?.latest?.aboveEma200 ? 'BUY' : 'SELL')}
+                Execute {mrxEvaluation?.lastSignal?.direction ?? (mrxEvaluation?.latest?.aboveEma30 ? 'BUY' : 'SELL')}
               </button>
               <button
                 type="button"
@@ -755,13 +755,13 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
           {!mrxEvaluation?.latest ? (
             <div className="py-4 text-xs text-slate-500 dark:text-slate-400">
-              Waiting for live candles to compute EMA 9 / EMA 15 / EMA 200 reversal signals.
+              Waiting for live candles to compute EMA 9 / EMA 15 / EMA 30 continuous signals.
             </div>
           ) : (
             <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 text-xs">
               <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 9 (Green)</div>
-                <div className="font-mono-tabular text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 9 (Lime)</div>
+                <div className="font-mono-tabular text-sm font-bold text-lime-600 dark:text-lime-400 mt-0.5">
                   {cur}
                   {mrxEvaluation.latest.ema9}
                 </div>
@@ -776,31 +776,31 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               </div>
 
               <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 200 (Red)</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 30 (Red)</div>
                 <div className="font-mono-tabular text-sm font-bold text-rose-600 dark:text-rose-400 mt-0.5">
                   {cur}
-                  {mrxEvaluation.latest.ema200}
+                  {mrxEvaluation.latest.ema30}
                 </div>
               </div>
 
               <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
-                <div className="text-[11px] text-slate-500 dark:text-slate-400">Macro Filter</div>
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 30 Filter</div>
                 <div
                   className={`text-xs font-semibold mt-1 ${
-                    mrxEvaluation.latest.aboveEma200
+                    mrxEvaluation.latest.aboveEma30
                       ? 'text-emerald-700 dark:text-emerald-400'
                       : 'text-rose-700 dark:text-rose-400'
                   }`}
                 >
-                  {mrxEvaluation.latest.aboveEma200
-                    ? 'Close > EMA 200 (BUY Zone)'
-                    : 'Close < EMA 200 (SELL Zone)'}
+                  {mrxEvaluation.latest.aboveEma30
+                    ? 'Close > EMA 30 (BUY Zone)'
+                    : 'Close < EMA 30 (SELL Zone)'}
                 </div>
               </div>
 
               <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 col-span-2 md:col-span-1">
                 <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Last Reversal ({mrxEvaluation.signals.length} on chart)
+                  Last Signal ({mrxEvaluation.signals.length} on chart)
                 </div>
                 {mrxEvaluation.lastSignal ? (
                   <div className="mt-0.5 flex items-baseline justify-between gap-1.5">
