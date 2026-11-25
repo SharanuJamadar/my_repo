@@ -5,6 +5,7 @@ import {
   type ChatMessageRecord,
   type StrategyConfig,
 } from '../types/trading';
+import { authFetch } from '../lib/authFetch';
 
 interface ChatbotViewProps {
   messages: ChatMessageRecord[];
@@ -71,7 +72,7 @@ export const ChatbotView: React.FC<ChatbotViewProps> = ({
 
     try {
       await onSendUserMessage(trimmed, selectedInstrumentId);
-      const res = await fetch('/api/ai/chat', {
+      const res = await authFetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

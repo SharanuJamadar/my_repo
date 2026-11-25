@@ -32,12 +32,15 @@ service cloud.firestore {
       return isVerifiedUser() && request.auth.uid == uid;
     }
 
-    function isBootstrappedAdmin() {
-      return isVerifiedUser() && request.auth.token.email == 'sharanu12131415@gmail.com';
+    // Role-based admin check via verified Firebase custom claims (zero-read for list rules, no hardcoded personal emails)
+    function isAdminClaim() {
+      return isVerifiedUser()
+        && (request.auth.token.admin == true || request.auth.token.role == 'admin');
     }
 
+    // Full admin check for single-document rules (custom claim OR admins/{uid} collection)
     function isAdmin() {
-      return isBootstrappedAdmin() || (
+      return isAdminClaim() || (
         isVerifiedUser() && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
       );
     }
@@ -46,8 +49,16 @@ service cloud.firestore {
       return val is string && val.size() >= minLen && val.size() <= maxLen;
     }
 
+    // Bounded string-list validation checking head, middle, and tail indices plus per-element size
     function isValidBoundedStringList(arr, maxItems) {
-      return arr is list && arr.size() <= maxItems && (arr.size() == 0 || arr[0] is string);
+      return arr is list
+        && arr.size() <= maxItems
+        && (arr.size() < 1 || (arr[0] is string && arr[0].size() <= 300))
+        && (arr.size() < 2 || (arr[1] is string && arr[1].size() <= 300))
+        && (arr.size() < 3 || (arr[2] is string && arr[2].size() <= 300))
+        && (arr.size() < 4 || (arr[3] is string && arr[3].size() <= 300))
+        && (arr.size() < 5 || (arr[4] is string && arr[4].size() <= 300))
+        && (arr.size() < 1 || (arr[arr.size() - 1] is string && arr[arr.size() - 1].size() <= 300));
     }
 
     // --- Validation Blueprints ---
@@ -246,7 +257,7 @@ service cloud.firestore {
         && (!('target2' in data) || (data.target2 is number && data.target2 >= 0))
         && (!('target3' in data) || (data.target3 is number && data.target3 >= 0))
         && data.executionMode in ['PAPER', 'LIVE']
-        && isValidString(data.brokerName, 1, 60)
+        && isValidString(data.brokerName, 1, 80)
         && (!('brokerOrderId' in data) || isValidString(data.brokerOrderId, 0, 80))
         && data.status in ['CONFIRMED_PAPER', 'SUBMITTED_LIVE', 'REJECTED', 'KILLED']
         && data.createdAt is timestamp
@@ -324,20 +335,20 @@ service cloud.firestore {
     // --- Collection Rules ---
 
     match /admins/{adminUid} {
-      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isBootstrappedAdmin());
+      allow get: if isValidId(adminUid) && (isOwner(adminUid) || isAdminClaim());
       allow list: if false;
-      allow create, update, delete: if isValidId(adminUid) && isBootstrappedAdmin();
+      allow create, update, delete: if isValidId(adminUid) && isAdminClaim();
     }
 
     match /users/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isBootstrappedAdmin();
+      allow list: if isAdminClaim();
       allow create: if isValidId(userId)
         && isOwner(userId)
         && isValidUserProfile(incoming(), userId)
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time
-        && (incoming().role == 'trader' || isBootstrappedAdmin());
+        && (incoming().role == 'trader' || isAdminClaim());
       allow update: if isValidId(userId)
         && isValidUserProfile(incoming(), userId)
         && incoming().uid == existing().uid
@@ -356,7 +367,7 @@ service cloud.firestore {
 
     match /strategyConfigs/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(userId)
         && isOwner(userId)
         && isValidStrategyConfig(incoming(), userId)
@@ -386,7 +397,7 @@ service cloud.firestore {
 
     match /signals/{signalId} {
       allow get: if isValidId(signalId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(signalId)
         && isVerifiedUser()
         && isValidTradeSignal(incoming())
@@ -416,7 +427,7 @@ service cloud.firestore {
 
     match /trades/{tradeId} {
       allow get: if isValidId(tradeId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(tradeId)
         && isVerifiedUser()
         && isValidTradeJournalEntry(incoming())
@@ -449,7 +460,7 @@ service cloud.firestore {
 
     match /chatMessages/{messageId} {
       allow get: if isValidId(messageId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(messageId)
         && isVerifiedUser()
         && isValidChatMessage(incoming())
@@ -461,7 +472,7 @@ service cloud.firestore {
 
     match /telegramLogs/{logId} {
       allow get: if isValidId(logId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(logId)
         && isVerifiedUser()
         && isValidTelegramLog(incoming())
@@ -473,7 +484,7 @@ service cloud.firestore {
 
     match /executionOrders/{orderId} {
       allow get: if isValidId(orderId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(orderId)
         && isVerifiedUser()
         && isValidExecutionOrder(incoming())
@@ -499,7 +510,7 @@ service cloud.firestore {
 
     match /demoWallets/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(userId)
         && isOwner(userId)
         && isValidDemoWallet(incoming(), userId)
@@ -522,7 +533,7 @@ service cloud.firestore {
 
     match /accountSettings/{userId} {
       allow get: if isValidId(userId) && (isOwner(userId) || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(userId)
         && isOwner(userId)
         && isValidAccountSettings(incoming(), userId)
@@ -547,7 +558,7 @@ service cloud.firestore {
 
     match /pineStrategies/{strategyId} {
       allow get: if isValidId(strategyId) && isVerifiedUser() && (existing().userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && (resource.data.userId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isVerifiedUser() && (resource.data.userId == request.auth.uid || isAdminClaim());
       allow create: if isValidId(strategyId)
         && isVerifiedUser()
         && isValidPineStrategy(incoming())

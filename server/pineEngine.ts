@@ -288,11 +288,104 @@ function calcMacdTuple(
   return { macd, signal, hist };
 }
 
-function stripPineComments(code: string): string[] {
-  return code
-    .split(/\r?\n/)
-    .map((line) => line.replace(/\/\/.*$/, '').trim())
-    .filter((line) => line.length > 0);
+interface PineStatement {
+  text: string;
+  indented: boolean;
+}
+
+function parsePineStatements(code: string): PineStatement[] {
+  const rawLines = code.split(/\r?\n/);
+  const statements: PineStatement[] = [];
+
+  let buffer = '';
+  let bufferIndented = false;
+  let parenDepth = 0;
+
+  const updateDepth = (s: string, startDepth: number): number => {
+    let d = startDepth;
+    let quote: string | null = null;
+    for (let i = 0; i < s.length; i++) {
+      const ch = s[i];
+      if (quote) {
+        if (ch === quote && s[i - 1] !== '\\') quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch === '(' || ch === '[') d++;
+      else if (ch === ')' || ch === ']') d = Math.max(0, d - 1);
+    }
+    return d;
+  };
+
+  const endsWithContinuation = (s: string): boolean =>
+    /(?:\band|\bor|,|\+|-|\*|\/|=|\?|:)$/i.test(s.trim());
+
+  const flush = () => {
+    const trimmed = buffer.trim();
+    if (trimmed) {
+      statements.push({ text: trimmed, indented: bufferIndented });
+    }
+    buffer = '';
+    bufferIndented = false;
+    parenDepth = 0;
+  };
+
+  for (const raw of rawLines) {
+    // Strip // comments outside string literals
+    let cleaned = '';
+    let quote: string | null = null;
+    for (let i = 0; i < raw.length; i++) {
+      const ch = raw[i];
+      if (quote) {
+        cleaned += ch;
+        if (ch === quote && raw[i - 1] !== '\\') quote = null;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        cleaned += ch;
+        continue;
+      }
+      if (ch === '/' && raw[i + 1] === '/') break;
+      cleaned += ch;
+    }
+
+    const trimmed = cleaned.trim();
+    if (!trimmed) continue;
+
+    const isIndented = /^[ \t]+/.test(cleaned);
+
+    if (buffer) {
+      const mustContinue = parenDepth > 0 || endsWithContinuation(buffer);
+      if (mustContinue) {
+        buffer = `${buffer} ${trimmed}`;
+        parenDepth = updateDepth(trimmed, parenDepth);
+        if (parenDepth === 0 && !endsWithContinuation(buffer)) {
+          flush();
+        }
+        continue;
+      }
+      flush();
+    }
+
+    buffer = trimmed;
+    bufferIndented = isIndented;
+    parenDepth = updateDepth(trimmed, 0);
+    if (parenDepth === 0 && !endsWithContinuation(buffer)) {
+      flush();
+    }
+  }
+
+  flush();
+  return statements;
+}
+
+interface PineRuntimeState {
+  positionSize: number;
+  isConfirmed?: boolean;
 }
 
 interface ParsedPineContext {
@@ -301,6 +394,7 @@ interface ParsedPineContext {
   overlays: { label: string; color: string; seriesKey: string }[];
   longExpr: string | null;
   shortExpr: string | null;
+  hasExplicitReversal: boolean;
 }
 
 const OVERLAY_PALETTE = ['#F59E0B', '#38BDF8', '#A855F7', '#E2E8F0', '#22D3EE', '#FB7185'];
@@ -339,10 +433,16 @@ function evalNumericToken(
   rawExpr: string,
   barIdx: number,
   series: SeriesMap,
-  scalars: Map<string, number>
+  scalars: Map<string, number>,
+  runtimeState: PineRuntimeState = { positionSize: 0, isConfirmed: true }
 ): number {
   const expr = rawExpr.trim();
   if (!expr) return NaN;
+
+  // Built-in strategy state
+  if (expr === 'strategy.position_size') {
+    return runtimeState.positionSize;
+  }
 
   // Literal number
   if (/^-?\d+(\.\d+)?$/.test(expr)) {
@@ -369,7 +469,7 @@ function evalNumericToken(
       }
     }
     if (wrapsAll) {
-      return evalNumericToken(expr.slice(1, -1), barIdx, series, scalars);
+      return evalNumericToken(expr.slice(1, -1), barIdx, series, scalars, runtimeState);
     }
   }
 
@@ -384,8 +484,8 @@ function evalNumericToken(
       if (ch === ')' || ch === ']') depth++;
       else if (ch === '(' || ch === '[') depth--;
       else if (depth === 0 && ops.includes(ch)) {
-        const left = evalNumericToken(expr.slice(0, i), barIdx, series, scalars);
-        const right = evalNumericToken(expr.slice(i + 1), barIdx, series, scalars);
+        const left = evalNumericToken(expr.slice(0, i), barIdx, series, scalars, runtimeState);
+        const right = evalNumericToken(expr.slice(i + 1), barIdx, series, scalars, runtimeState);
         if (!Number.isFinite(left) || !Number.isFinite(right)) return NaN;
         if (ch === '+') return left + right;
         if (ch === '-') return left - right;
@@ -453,18 +553,25 @@ function splitBinaryTopLevel(expr: string, token: string): [string, string] | nu
   return null;
 }
 
-function evalBooleanExpr(
+export function evalBooleanExpr(
   rawExpr: string,
   barIdx: number,
   series: SeriesMap,
   scalars: Map<string, number>,
-  boolVars: Map<string, string>
+  boolVars: Map<string, string>,
+  runtimeState: PineRuntimeState = { positionSize: 0, isConfirmed: true }
 ): boolean {
   let expr = rawExpr.trim();
   if (!expr) return false;
 
   if (expr === 'true') return true;
   if (expr === 'false') return false;
+  if (expr === 'barstate.isconfirmed' || expr === 'barstate.ishistory') {
+    return runtimeState.isConfirmed !== false;
+  }
+  if (expr === 'barstate.isrealtime') {
+    return false;
+  }
 
   // Strip wrapping parentheses if balanced around entire expression
   while (expr.startsWith('(') && expr.endsWith(')')) {
@@ -486,15 +593,15 @@ function evalBooleanExpr(
 
   // Boolean variable expansion
   if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(expr) && boolVars.has(expr)) {
-    return evalBooleanExpr(boolVars.get(expr)!, barIdx, series, scalars, boolVars);
+    return evalBooleanExpr(boolVars.get(expr)!, barIdx, series, scalars, boolVars, runtimeState);
   }
 
   // Logical OR
   const orSplit = splitBinaryTopLevel(expr, ' or ');
   if (orSplit) {
     return (
-      evalBooleanExpr(orSplit[0], barIdx, series, scalars, boolVars) ||
-      evalBooleanExpr(orSplit[1], barIdx, series, scalars, boolVars)
+      evalBooleanExpr(orSplit[0], barIdx, series, scalars, boolVars, runtimeState) ||
+      evalBooleanExpr(orSplit[1], barIdx, series, scalars, boolVars, runtimeState)
     );
   }
 
@@ -502,14 +609,14 @@ function evalBooleanExpr(
   const andSplit = splitBinaryTopLevel(expr, ' and ');
   if (andSplit) {
     return (
-      evalBooleanExpr(andSplit[0], barIdx, series, scalars, boolVars) &&
-      evalBooleanExpr(andSplit[1], barIdx, series, scalars, boolVars)
+      evalBooleanExpr(andSplit[0], barIdx, series, scalars, boolVars, runtimeState) &&
+      evalBooleanExpr(andSplit[1], barIdx, series, scalars, boolVars, runtimeState)
     );
   }
 
   // Logical NOT
   if (expr.startsWith('not ')) {
-    return !evalBooleanExpr(expr.slice(4), barIdx, series, scalars, boolVars);
+    return !evalBooleanExpr(expr.slice(4), barIdx, series, scalars, boolVars, runtimeState);
   }
 
   // ta.rising(src, len) & ta.falling(src, len)
@@ -542,10 +649,10 @@ function evalBooleanExpr(
     if (barIdx < 1) return false;
     const args = splitTopLevelArgs(crossMatch[2]);
     if (args.length < 2) return false;
-    const aNow = evalNumericToken(args[0], barIdx, series, scalars);
-    const bNow = evalNumericToken(args[1], barIdx, series, scalars);
-    const aPrev = evalNumericToken(args[0], barIdx - 1, series, scalars);
-    const bPrev = evalNumericToken(args[1], barIdx - 1, series, scalars);
+    const aNow = evalNumericToken(args[0], barIdx, series, scalars, runtimeState);
+    const bNow = evalNumericToken(args[1], barIdx, series, scalars, runtimeState);
+    const aPrev = evalNumericToken(args[0], barIdx - 1, series, scalars, runtimeState);
+    const bPrev = evalNumericToken(args[1], barIdx - 1, series, scalars, runtimeState);
     if (
       !Number.isFinite(aNow) ||
       !Number.isFinite(bNow) ||
@@ -564,8 +671,8 @@ function evalBooleanExpr(
   for (const op of ['>=', '<=', '==', '!=', '>', '<'] as const) {
     const cmpSplit = splitBinaryTopLevel(expr, op);
     if (cmpSplit) {
-      const l = evalNumericToken(cmpSplit[0], barIdx, series, scalars);
-      const r = evalNumericToken(cmpSplit[1], barIdx, series, scalars);
+      const l = evalNumericToken(cmpSplit[0], barIdx, series, scalars, runtimeState);
+      const r = evalNumericToken(cmpSplit[1], barIdx, series, scalars, runtimeState);
       if (!Number.isFinite(l) || !Number.isFinite(r)) return false;
       switch (op) {
         case '>=':
@@ -587,7 +694,19 @@ function evalBooleanExpr(
   return false;
 }
 
-function buildPineExecutionContext(
+const PINE_COLOR_MAP: Record<string, string> = {
+  'color.green': '#22C55E',
+  'color.lime': '#84CC16',
+  'color.orange': '#F97316',
+  'color.red': '#EF4444',
+  'color.blue': '#38BDF8',
+  'color.aqua': '#22D3EE',
+  'color.yellow': '#FACC15',
+  'color.purple': '#A855F7',
+  'color.white': '#E2E8F0',
+};
+
+export function buildPineExecutionContext(
   pineCode: string,
   candles: CandleBar[]
 ): {
@@ -595,7 +714,7 @@ function buildPineExecutionContext(
   scalars: Map<string, number>;
   boolVars: Map<string, string>;
 } {
-  const lines = stripPineComments(pineCode);
+  const statements = parsePineStatements(pineCode);
   const closes = candles.map((c) => c.close);
   const opens = candles.map((c) => c.open);
   const highs = candles.map((c) => c.high);
@@ -626,6 +745,7 @@ function buildPineExecutionContext(
   let scriptTitle = 'Custom Pine Strategy';
   let longExpr: string | null = null;
   let shortExpr: string | null = null;
+  let hasExplicitReversal = false;
 
   const verMatch = pineCode.match(/\/\/@version=(\d+)/);
   if (verMatch) pineVersion = `v${verMatch[1]}`;
@@ -677,12 +797,42 @@ function buildPineExecutionContext(
 
   let colorIdx = 0;
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+  for (let i = 0; i < statements.length; i++) {
+    const stmt = statements[i];
+    const line = stmt.text;
 
     const headerMatch = line.match(/^(?:strategy|indicator|study)\(\s*["']([^"']+)["']/);
     if (headerMatch) {
       scriptTitle = headerMatch[1];
+      continue;
+    }
+
+    // Apply explicit plot(...) colors and titles to matching series overlays
+    const plotMatch = line.match(/^plot\((.+)\)$/);
+    if (plotMatch) {
+      const args = splitTopLevelArgs(plotMatch[1]);
+      const seriesKey = args[0]?.trim();
+      if (seriesKey && series[seriesKey]) {
+        const titleArg = args
+          .slice(1)
+          .find((a) => /^["'][^"']+["']$/.test(a) || /^title\s*=/.test(a));
+        const colorArg = args.find((a) => /^color\s*=/.test(a) || a.startsWith('color.'));
+        const existing = overlays.find((o) => o.seriesKey === seriesKey);
+        const resolvedColor = colorArg
+          ? PINE_COLOR_MAP[colorArg.replace(/^color\s*=\s*/, '').trim()]
+          : undefined;
+        const resolvedLabel = titleArg
+          ? titleArg.replace(/^title\s*=\s*/, '').replace(/^["']|["']$/g, '')
+          : undefined;
+        if (existing) {
+          if (resolvedColor) existing.color = resolvedColor;
+          if (resolvedLabel) existing.label = resolvedLabel;
+        }
+      }
+      continue;
+    }
+
+    if (line.startsWith('plotshape(') || line.startsWith('alertcondition(')) {
       continue;
     }
 
@@ -831,12 +981,29 @@ function buildPineExecutionContext(
       continue;
     }
 
-    const inlineIfMatch = line.match(/^if\s*\(?(.+?)\)?\s*(strategy\.entry\(.+\))?$/);
+    const inlineIfMatch = line.match(/^if\s+(.+?)(?:\s+(strategy\.(?:entry|close)\(.+\)))?$/);
     if (inlineIfMatch) {
-      const cond = inlineIfMatch[1].replace(/\)$/, '').trim();
+      const cond = inlineIfMatch[1].trim();
       const sameLineCall = inlineIfMatch[2];
-      const nextLine = lines[i + 1] || '';
-      const entryLine = sameLineCall || (nextLine.startsWith('strategy.entry') ? nextLine : '');
+      const bodyLines: string[] = [];
+      if (sameLineCall) {
+        bodyLines.push(sameLineCall);
+      } else {
+        let j = i + 1;
+        while (j < statements.length && statements[j].indented) {
+          bodyLines.push(statements[j].text);
+          j++;
+        }
+        if (bodyLines.length > 0) {
+          i = j - 1;
+        }
+      }
+
+      if (bodyLines.some((b) => b.startsWith('strategy.close('))) {
+        hasExplicitReversal = true;
+      }
+
+      const entryLine = bodyLines.find((b) => b.startsWith('strategy.entry('));
       if (entryLine) {
         registerInlineCalls(cond);
         if (entryLine.includes('strategy.long')) {
@@ -844,7 +1011,6 @@ function buildPineExecutionContext(
         } else if (entryLine.includes('strategy.short')) {
           shortExpr = cond;
         }
-        if (!sameLineCall) i++;
         continue;
       }
     }
@@ -902,6 +1068,7 @@ function buildPineExecutionContext(
       overlays,
       longExpr,
       shortExpr,
+      hasExplicitReversal,
     },
     scalars,
     boolVars,
@@ -1055,11 +1222,20 @@ export async function runPineBacktest(params: {
     const bar = candles[i];
 
     if (i >= warmup) {
+      const currentPositionSize = openPos
+        ? openPos.side === 'BUY'
+          ? openPos.qty
+          : -openPos.qty
+        : 0;
+      const runtimeState: PineRuntimeState = {
+        positionSize: currentPositionSize,
+        isConfirmed: true,
+      };
       const longSig = ctx.longExpr
-        ? evalBooleanExpr(ctx.longExpr, i, ctx.series, scalars, boolVars)
+        ? evalBooleanExpr(ctx.longExpr, i, ctx.series, scalars, boolVars, runtimeState)
         : false;
       const shortSig = ctx.shortExpr
-        ? evalBooleanExpr(ctx.shortExpr, i, ctx.series, scalars, boolVars)
+        ? evalBooleanExpr(ctx.shortExpr, i, ctx.series, scalars, boolVars, runtimeState)
         : false;
 
       // 1. Check stop-loss / 3-TP stepped trailing / full TP3 target / reversal on open position
@@ -1084,7 +1260,7 @@ export async function runPineBacktest(params: {
             if (trailingEnabled) {
               openPos.sl = Math.max(openPos.sl, openPos.tp2);
             }
-          } else if (shortSig && !longSig && openPos.tpReached === 0) {
+          } else if (shortSig && !longSig && (ctx.hasExplicitReversal || openPos.tpReached === 0)) {
             exitPrice = bar.close;
             exitReason = 'SIGNAL_REVERSE';
           }
@@ -1104,7 +1280,7 @@ export async function runPineBacktest(params: {
             if (trailingEnabled) {
               openPos.sl = Math.min(openPos.sl, openPos.tp2);
             }
-          } else if (longSig && !shortSig && openPos.tpReached === 0) {
+          } else if (longSig && !shortSig && (ctx.hasExplicitReversal || openPos.tpReached === 0)) {
             exitPrice = bar.close;
             exitReason = 'SIGNAL_REVERSE';
           }

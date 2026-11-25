@@ -31,6 +31,7 @@ import {
   type TradeMode,
 } from '../types/trading';
 import { PINE_STRATEGY_TEMPLATES } from '../lib/pineTemplates';
+import { authFetch } from '../lib/authFetch';
 import { useTheme } from '../lib/theme';
 
 interface PineStrategyBotViewProps {
@@ -147,6 +148,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
     setInstrumentId(tpl.instrumentId);
     setTimeframe(tpl.timeframe);
     setQuantity(tpl.quantity);
+    setInitialCapital(tpl.initialCapital ?? 100000);
     setStopLossPct(tpl.stopLossPct);
     setTakeProfitPct(tpl.takeProfitPct);
     setRiskPerTradePct(tpl.riskPerTradePct);
@@ -200,7 +202,7 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
     setBacktesting(true);
     setBacktestError(null);
     try {
-      const res = await fetch('/api/pine/backtest', {
+      const res = await authFetch('/api/pine/backtest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -733,9 +735,9 @@ export const PineStrategyBotView: React.FC<PineStrategyBotViewProps> = ({
 
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-xs">
-              <label className="text-slate-500 dark:text-slate-400">Pine Script v5 Source Code</label>
+              <label className="text-slate-500 dark:text-slate-400">Pine Script v5 / v6 Source Code</label>
               <span className="text-[11px] text-slate-500 font-mono-tabular">
-                Supports ta.ema, ta.sma, ta.rsi, ta.macd, ta.adx, ta.supertrend, ta.bb, ta.vwap, ta.rising/falling
+                Supports ta.ema, ta.sma, ta.rsi, ta.macd, ta.adx, ta.supertrend, ta.bb, ta.vwap, ta.crossover/crossunder, barstate.isconfirmed, strategy.position_size
               </span>
             </div>
             <textarea

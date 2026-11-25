@@ -1,4 +1,5 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
+import { z } from 'zod';
 import type {
   GeneratedSignalPayload,
   GroundingSource,
@@ -10,6 +11,121 @@ import type {
   StrategyConfig,
 } from '../src/types/trading.ts';
 import { buildAtmOptionRecommendation, formatSignalBlock } from './strategyEngine.ts';
+
+const DEFAULT_GEMINI_MODEL = 'gemini-4-hydrogen';
+
+export function getGeminiModel(): string {
+  const configured = process.env.GEMINI_MODEL?.trim();
+  return configured && /^[a-zA-Z0-9._-]{3,80}$/.test(configured)
+    ? configured
+    : DEFAULT_GEMINI_MODEL;
+}
+
+export function normalizeGeminiError(err: unknown): { status: number; message: string } {
+  const raw = err instanceof Error ? err.message : String(err || 'AI service request failed');
+  const lower = raw.toLowerCase();
+  if (lower.includes('429') || lower.includes('resource_exhausted') || lower.includes('quota')) {
+    return {
+      status: 429,
+      message: 'AI quota or rate limit reached. Please wait a moment and try again.',
+    };
+  }
+  if (lower.includes('401') || lower.includes('403') || lower.includes('api key') || lower.includes('permission')) {
+    return {
+      status: 503,
+      message: 'AI service credentials are unavailable or lack permission on this server.',
+    };
+  }
+  if (lower.includes('404') || lower.includes('not found') || lower.includes('invalid model')) {
+    return {
+      status: 502,
+      message: `Configured Gemini model (${getGeminiModel()}) is unavailable. Check GEMINI_MODEL in server environment.`,
+    };
+  }
+  if (lower.includes('timeout') || lower.includes('aborted')) {
+    return {
+      status: 504,
+      message: 'AI request timed out. Please retry.',
+    };
+  }
+  return {
+    status: 502,
+    message: 'AI analysis temporarily unavailable. Please try again shortly.',
+  };
+}
+
+const FiniteNonNegativeNumber = z.preprocess(
+  (val) => {
+    const n = typeof val === 'number' ? val : Number(val);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  },
+  z.number().finite().min(0)
+);
+
+const ChartAnalysisResponseSchema = z.object({
+  direction: z.enum(['BUY', 'SELL', 'NO_TRADE']).catch('NO_TRADE'),
+  status: z.enum(['ACTIVE', 'WAIT', 'INVALIDATED', 'NO_TRADE']).catch('NO_TRADE'),
+  contract: z.string().max(120).optional().catch(undefined),
+  entryTrigger: z.string().max(60).optional().catch(undefined),
+  entryPrice: FiniteNonNegativeNumber.catch(0),
+  stopLoss: FiniteNonNegativeNumber.catch(0),
+  target1: FiniteNonNegativeNumber.catch(0),
+  target2: FiniteNonNegativeNumber.catch(0),
+  target3: z
+    .preprocess((val) => {
+      if (val === undefined || val === null || val === '') return undefined;
+      const n = Number(val);
+      return Number.isFinite(n) && n > 0 ? n : undefined;
+    }, z.number().positive().optional())
+    .catch(undefined),
+  invalidationLevel: FiniteNonNegativeNumber.optional().catch(undefined),
+  riskReward: z.string().max(30).optional().catch('N/A'),
+  qualityScore: z
+    .preprocess((val) => {
+      const n = typeof val === 'number' ? val : Number(val);
+      if (!Number.isFinite(n)) return 0;
+      return Math.max(0, Math.min(100, Math.round(n)));
+    }, z.number().int().min(0).max(100))
+    .catch(0),
+  marketStructure: z.string().max(300).optional().catch(undefined),
+  trendDirection: z.string().max(300).optional().catch(undefined),
+  candlestickPatterns: z.string().max(300).optional().catch(undefined),
+  confirmationText: z.string().max(600).catch('Insufficient chart confirmation.'),
+  verifiedFromChart: z.array(z.string().max(240)).max(15).catch([]),
+  estimatedOrNotVisible: z.array(z.string().max(240)).max(15).catch([]),
+  reasonsFor: z.array(z.string().max(240)).max(12).catch([]),
+  reasonsAgainst: z.array(z.string().max(240)).max(12).catch([]),
+  checklist: z
+    .array(
+      z.object({
+        label: z.string().max(120).catch('Rule'),
+        passed: z.boolean().catch(false),
+        detail: z.string().max(300).catch(''),
+      })
+    )
+    .max(15)
+    .catch([]),
+});
+
+export function parseChartAnalysisJson(rawText: string) {
+  let rawObj: unknown = null;
+  try {
+    rawObj = JSON.parse(rawText);
+  } catch {
+    rawObj = extractJsonObject(rawText);
+  }
+  if (!rawObj || typeof rawObj !== 'object') {
+    return ChartAnalysisResponseSchema.parse({
+      direction: 'NO_TRADE',
+      status: 'NO_TRADE',
+      qualityScore: 0,
+      confirmationText:
+        'AI response could not be parsed as structured JSON. Enforcing NO TRADE for safety.',
+      reasonsAgainst: ['Malformed AI analysis payload rejected by schema validator.'],
+    });
+  }
+  return ChartAnalysisResponseSchema.parse(rawObj);
+}
 
 function getGeminiClient(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -73,8 +189,8 @@ export async function analyzeUploadedChartWithGemini(params: {
 Context provided by the trader:
 - Instrument: ${instrument.symbol} (${instrument.name}, Exchange: ${instrument.exchangeLabel}, Currency: ${instrument.currency})
 - Chart Timeframe Shown: ${timeframe}
-- User-Entered Current Market Price: ${currentPrice && currentPrice > 0 ? `${instrument.currency}${currentPrice}` : 'Not provided by user'}
-- Contract Mode: ${optionType}${expiry ? ` | Expiry: ${expiry}` : ''}
+- User-Entered Current Market Price: ${currentPrice && Number.isFinite(currentPrice) && currentPrice > 0 ? `${instrument.currency}${currentPrice}` : 'Not provided by user'}
+- Contract Mode: ${optionType}${expiry ? ` | Expiry: ${expiry.slice(0, 40)}` : ''}
 
 STRICT HONESTY RULE:
 - Do NOT pretend to read indicator numbers, exact prices, or volume bars that are NOT clearly legible in the screenshot.
@@ -83,18 +199,21 @@ STRICT HONESTY RULE:
 - Calculate Immediate/Strong Support & Resistance, Breakout/Breakdown levels, No-Trade Zone, Entry, Stop-Loss, Target 1, Target 2, optional Target 3, Invalidation Level, and a transparent 0-100 Setup Quality Score.`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: {
-      parts: [
-        {
-          inlineData: {
-            mimeType: mimeType || 'image/png',
-            data: cleanBase64,
+    model: getGeminiModel(),
+    contents: [
+      {
+        role: 'user',
+        parts: [
+          {
+            inlineData: {
+              mimeType: mimeType || 'image/png',
+              data: cleanBase64,
+            },
           },
-        },
-        { text: prompt },
-      ],
-    },
+          { text: prompt },
+        ],
+      },
+    ],
     config: {
       systemInstruction: buildStrategySystemRules(config),
       thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
@@ -156,18 +275,24 @@ STRICT HONESTY RULE:
   });
 
   const rawText = (response.text ?? '{}').trim();
-  const parsed = JSON.parse(rawText);
+  const parsed = parseChartAnalysisJson(rawText);
 
-  const score = Math.max(0, Math.min(100, Number(parsed.qualityScore ?? 0)));
+  const score = Number.isFinite(parsed.qualityScore)
+    ? Math.max(0, Math.min(100, parsed.qualityScore))
+    : 0;
   const shouldForceNoTrade =
-    parsed.direction === 'NO_TRADE' || score < config.minSetupScore;
+    parsed.direction === 'NO_TRADE' || !Number.isFinite(score) || score < config.minSetupScore;
   const finalDirection: 'BUY' | 'SELL' | 'NO_TRADE' = shouldForceNoTrade
     ? 'NO_TRADE'
     : parsed.direction;
-  const finalStatus = shouldForceNoTrade ? 'NO_TRADE' : (parsed.status || 'WAIT');
+  const finalStatus = shouldForceNoTrade ? 'NO_TRADE' : parsed.status || 'WAIT';
 
-  const refPrice = currentPrice && currentPrice > 0 ? currentPrice : Number(parsed.entryPrice || 0);
-  const atmContext = refPrice > 0 ? buildAtmOptionRecommendation(instrument, refPrice, finalDirection) : undefined;
+  const refPrice =
+    currentPrice && Number.isFinite(currentPrice) && currentPrice > 0
+      ? currentPrice
+      : parsed.entryPrice;
+  const atmContext =
+    refPrice > 0 ? buildAtmOptionRecommendation(instrument, refPrice, finalDirection) : undefined;
   const contractLabel =
     parsed.contract ||
     (optionType !== 'SPOT_FUT' && atmContext
@@ -179,11 +304,11 @@ STRICT HONESTY RULE:
     contract: contractLabel,
     direction: finalDirection,
     currency: instrument.currency,
-    entryPrice: Number(parsed.entryPrice || 0),
-    target1: Number(parsed.target1 || 0),
-    target2: Number(parsed.target2 || 0),
-    target3: parsed.target3 ? Number(parsed.target3) : undefined,
-    stopLoss: Number(parsed.stopLoss || 0),
+    entryPrice: parsed.entryPrice,
+    target1: parsed.target1,
+    target2: parsed.target2,
+    target3: parsed.target3,
+    stopLoss: parsed.stopLoss,
     entryTimeframe: timeframe,
     trendTimeframe: config.trendTimeframe,
     horizon: 'INTRADAY',
@@ -200,22 +325,23 @@ STRICT HONESTY RULE:
     entryTrigger:
       parsed.entryTrigger ||
       (finalDirection === 'BUY' ? 'BUY ABOVE' : finalDirection === 'SELL' ? 'SELL BELOW' : 'NO TRADE'),
-    entryPrice: finalDirection === 'NO_TRADE' ? 0 : Number(parsed.entryPrice || 0),
-    stopLoss: finalDirection === 'NO_TRADE' ? 0 : Number(parsed.stopLoss || 0),
-    target1: finalDirection === 'NO_TRADE' ? 0 : Number(parsed.target1 || 0),
-    target2: finalDirection === 'NO_TRADE' ? 0 : Number(parsed.target2 || 0),
-    target3: finalDirection === 'NO_TRADE' ? undefined : parsed.target3 ? Number(parsed.target3) : undefined,
+    entryPrice: finalDirection === 'NO_TRADE' ? 0 : parsed.entryPrice,
+    stopLoss: finalDirection === 'NO_TRADE' ? 0 : parsed.stopLoss,
+    target1: finalDirection === 'NO_TRADE' ? 0 : parsed.target1,
+    target2: finalDirection === 'NO_TRADE' ? 0 : parsed.target2,
+    target3: finalDirection === 'NO_TRADE' ? undefined : parsed.target3,
     riskReward: parsed.riskReward || 'N/A',
     entryTimeframe: timeframe.toUpperCase(),
     trendTimeframe: config.trendTimeframe.toUpperCase(),
     horizon: 'INTRADAY',
-    invalidationLevel: Number(parsed.invalidationLevel || parsed.stopLoss || 0),
+    invalidationLevel:
+      finalDirection === 'NO_TRADE' ? 0 : (parsed.invalidationLevel ?? parsed.stopLoss),
     confirmationText: parsed.confirmationText || '',
     status: finalStatus,
     qualityScore: score,
-    checklist: Array.isArray(parsed.checklist) ? parsed.checklist : [],
-    reasonsFor: Array.isArray(parsed.reasonsFor) ? parsed.reasonsFor : [],
-    reasonsAgainst: Array.isArray(parsed.reasonsAgainst) ? parsed.reasonsAgainst : [],
+    checklist: parsed.checklist,
+    reasonsFor: parsed.reasonsFor,
+    reasonsAgainst: parsed.reasonsAgainst,
     formattedSignalText: formatted.formattedSignalText,
     telegramReadyText: formatted.telegramReadyText,
     atmOptionContext: atmContext,
@@ -223,8 +349,8 @@ STRICT HONESTY RULE:
       .filter(Boolean)
       .join(' · '),
     verifiedVsEstimated: {
-      verifiedFromDataOrChart: Array.isArray(parsed.verifiedFromChart) ? parsed.verifiedFromChart : [],
-      estimatedOrNotVisible: Array.isArray(parsed.estimatedOrNotVisible) ? parsed.estimatedOrNotVisible : [],
+      verifiedFromDataOrChart: parsed.verifiedFromChart,
+      estimatedOrNotVisible: parsed.estimatedOrNotVisible,
     },
   };
 }
@@ -247,8 +373,8 @@ export async function enhanceLiveAnalysisWithGemini(params: {
 Do not invent any new prices; explain the exact technical alignment or why NO TRADE is enforced.`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: prompt,
+    model: getGeminiModel(),
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: {
       systemInstruction: buildStrategySystemRules(config),
       thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
@@ -279,38 +405,41 @@ export async function chatWithTradingAssistant(params: {
 - Levels: StrongSup=${entryQuote.levels?.strongSupport}, ImmSup=${entryQuote.levels?.immediateSupport}, ImmRes=${entryQuote.levels?.immediateResistance}, StrongRes=${entryQuote.levels?.strongResistance}, Breakout=${entryQuote.levels?.breakoutLevel}, Breakdown=${entryQuote.levels?.breakdownLevel}, NoTradeZone=${entryQuote.levels?.noTradeZoneLow}-${entryQuote.levels?.noTradeZoneHigh}`
       : `LIVE MARKET DATA STATUS FOR ${instrument.symbol}: DATA UNAVAILABLE. Do NOT fabricate live prices. State clearly if live prices are unavailable and base any structural guidance strictly on user-supplied values or an attached chart.`;
 
-  const historyText = history
-    .slice(-8)
-    .map((m) => `${m.role === 'user' ? 'TRADER' : 'SHARAN_AI'}: ${m.content}`)
-    .join('\n');
+  // Build structured role-separated turns instead of concatenating raw strings
+  const contents: Array<{ role: 'user' | 'model'; parts: Array<Record<string, unknown>> }> = [];
 
-  const fullPrompt = `${marketContextBlock}
+  for (const turn of history.slice(-8)) {
+    if (!turn || typeof turn.content !== 'string' || !turn.content.trim()) continue;
+    contents.push({
+      role: turn.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: turn.content.slice(0, 4000) }],
+    });
+  }
 
-RECENT CONVERSATION:
-${historyText || '(New session)'}
-
-TRADER QUESTION:
-${message}
-
-Respond directly, cleanly, and concisely as the My Trade analyst. If generating a trade signal, use the exact My Trade format (or explicitly state NO TRADE if rules are not satisfied).`;
-
-  const parts: any[] = [];
+  const currentParts: Array<Record<string, unknown>> = [];
   if (imageBase64) {
     const clean = imageBase64.includes(',') ? imageBase64.split(',')[1] : imageBase64;
-    parts.push({
+    currentParts.push({
       inlineData: {
         mimeType: mimeType || 'image/png',
         data: clean,
       },
     });
   }
-  parts.push({ text: fullPrompt });
+  currentParts.push({ text: message.slice(0, 4000) });
+  contents.push({ role: 'user', parts: currentParts });
+
+  const systemInstruction = `${buildStrategySystemRules(config)}
+
+${marketContextBlock}
+
+Respond directly, cleanly, and concisely as the My Trade analyst. If generating a trade signal, use the exact My Trade format (or explicitly state NO TRADE if rules are not satisfied).`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: { parts },
+    model: getGeminiModel(),
+    contents,
     config: {
-      systemInstruction: buildStrategySystemRules(config),
+      systemInstruction,
       thinkingConfig: { thinkingLevel: ThinkingLevel.MEDIUM },
       tools: [{ googleSearch: {} }],
     },
@@ -403,8 +532,8 @@ Respond ONLY with valid JSON (no commentary before or after) matching this exact
 Use standard ticker labels in affectedAssets where relevant (NIFTY50, BANKNIFTY, SENSEX, XAUUSD, XAGUSD, CRUDEOIL, BTCUSDT, ETHUSDT, EURUSD, USDJPY, US100, US500).`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents: prompt,
+    model: getGeminiModel(),
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
     config: {
       thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
       tools: [{ googleSearch: {} }],

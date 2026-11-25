@@ -464,7 +464,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                   <Check className="w-4 h-4" />
                   {submitting
                     ? 'Connecting...'
-                    : `Connect ${selectedBroker.name} & Enter Landing Page`}
+                    : `Connect ${selectedBroker.name} & Enter Trading Desk`}
                 </button>
               </div>
             </form>
@@ -622,7 +622,7 @@ export const AccountOnboardingView: React.FC<AccountOnboardingViewProps> = ({
                   <Check className="w-4 h-4" />
                   {submitting
                     ? 'Creating Demo Account...'
-                    : 'Create Demo Account & Enter Landing Page'}
+                    : 'Create Demo Account & Enter Trading Desk'}
                 </button>
               </div>
             </form>

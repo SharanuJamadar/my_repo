@@ -7,6 +7,7 @@ export interface PineTemplatePreset {
   instrumentId: string;
   timeframe: Timeframe;
   quantity: number;
+  initialCapital?: number;
   stopLossPct: number;
   takeProfitPct: number;
   riskPerTradePct: number;
@@ -107,6 +108,89 @@ if (longCondition)
 
 if (shortCondition)
     strategy.entry("IDX_SHORT", strategy.short)
+`,
+  },
+  {
+    id: 'mr-x-ema-9-15-200-reversal',
+    name: 'MR_X EMA 9-15-200 Reversal',
+    description:
+      'Pine Script v6 EMA 9/15 crossover/crossunder reversal system filtered by EMA 200 macro trend and confirmed bar close, with automatic long/short position reversal.',
+    instrumentId: 'XAUUSD',
+    timeframe: '5m',
+    quantity: 1,
+    initialCapital: 1000,
+    stopLossPct: 0.55,
+    takeProfitPct: 1.65,
+    riskPerTradePct: 2.0,
+    trailingStop: true,
+    pineCode: `//@version=6
+strategy("MR_X EMA 9-15-200 Reversal",
+     overlay=true,
+     initial_capital=1000,
+     pyramiding=0,
+     process_orders_on_close=true,
+     calc_on_order_fills=true)
+
+// EMA CALCULATION
+ema9   = ta.ema(close, 9)
+ema15  = ta.ema(close, 15)
+ema200 = ta.ema(close, 200)
+
+// CROSSOVER
+bullCross = ta.crossover(ema9, ema15)
+bearCross = ta.crossunder(ema9, ema15)
+
+// BUY CONDITION
+buySignal = barstate.isconfirmed and
+     close > ema200 and
+     close > ema9 and
+     close > ema15 and
+     bullCross
+
+// SELL CONDITION
+sellSignal = barstate.isconfirmed and
+     close < ema200 and
+     close < ema9 and
+     close < ema15 and
+     bearCross
+
+// TRADE REVERSAL
+if buySignal and strategy.position_size <= 0
+    strategy.close("SELL")
+    strategy.entry("BUY", strategy.long)
+
+if sellSignal and strategy.position_size >= 0
+    strategy.close("BUY")
+    strategy.entry("SELL", strategy.short)
+
+// EMA PLOTS
+plot(ema9, "EMA 9", color=color.green, linewidth=2)
+plot(ema15, "EMA 15", color=color.orange, linewidth=2)
+plot(ema200, "EMA 200", color=color.red, linewidth=2)
+
+// ONLY NEW SIGNALS
+plotshape(buySignal and strategy.position_size <= 0,
+     title="BUY",
+     style=shape.labelup,
+     location=location.belowbar,
+     color=color.green,
+     text="BUY",
+     textcolor=color.white)
+
+plotshape(sellSignal and strategy.position_size >= 0,
+     title="SELL",
+     style=shape.labeldown,
+     location=location.abovebar,
+     color=color.red,
+     text="SELL",
+     textcolor=color.white)
+
+// ALERTS
+alertcondition(buySignal and strategy.position_size <= 0,
+     "BUY Alert", "MR_X BUY Reversal")
+
+alertcondition(sellSignal and strategy.position_size >= 0,
+     "SELL Alert", "MR_X SELL Reversal")
 `,
   },
 ];

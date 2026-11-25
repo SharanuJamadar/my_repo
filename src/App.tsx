@@ -129,20 +129,14 @@ import { MobilePlayStoreSection } from './components/MobilePlayStoreSection';
 import { AuthLoginModal } from './components/AuthLoginModal';
 import { CommandPaletteModal } from './components/CommandPaletteModal';
 import { ThemeProvider, useTheme } from './lib/theme';
-
-const ACCOUNT_TYPE_STORAGE_KEY = 'mytrade_active_account_type';
-const SOUND_ALERTS_STORAGE_KEY = 'mytrade_sound_alerts';
-
-type ViewStage = 'landing' | 'onboarding' | 'workspace';
-
-type NavTab =
-  | 'dashboard'
-  | 'terminal'
-  | 'analyzer'
-  | 'journal'
-  | 'account'
-  | 'settings'
-  | 'mobile';
+import {
+  ACCOUNT_TYPE_STORAGE_KEY,
+  SOUND_ALERTS_STORAGE_KEY,
+  type ViewStage,
+  type NavTab,
+  parseHashRoute,
+} from './lib/routeUtils';
+import { useWorkspaceToasts } from './hooks/useWorkspaceToasts';
 
 const MASTER_ADMIN_EMAIL = 'sharanu12131415@gmail.com';
 
@@ -155,91 +149,6 @@ const NAV_ITEMS: { id: NavTab; label: string; icon: React.ComponentType<{ classN
   { id: 'settings', label: 'Admin Settings', icon: Settings },
   { id: 'mobile', label: 'App Download', icon: Smartphone },
 ];
-
-const VALID_NAV_TABS: NavTab[] = [
-  'dashboard',
-  'terminal',
-  'analyzer',
-  'journal',
-  'account',
-  'settings',
-  'mobile',
-];
-
-interface WorkspaceToast {
-  id: string;
-  title: string;
-  detail: string;
-  tone: 'emerald' | 'blue' | 'rose';
-}
-
-function parseHashRoute(hashStr: string): {
-  stage: ViewStage;
-  tab?: NavTab;
-  instrumentId?: string;
-  accountMode?: 'LIVE' | 'DEMO';
-} | null {
-  const cleaned = hashStr.replace(/^#\/?/, '').trim();
-  if (!cleaned) return null;
-  const parts = cleaned.split('/').filter(Boolean);
-  let idx = 0;
-  let accountMode: 'LIVE' | 'DEMO' | undefined;
-
-  const first = parts[0]?.toLowerCase();
-  if (!first || first === 'landing') return { stage: 'landing' };
-  if (first === 'onboarding') return { stage: 'onboarding' };
-
-  if (first === 'demo' || first === 'live') {
-    accountMode = first === 'live' ? 'LIVE' : 'DEMO';
-    idx = 1;
-    if (!parts[idx]) {
-      return { stage: 'workspace', tab: 'dashboard', accountMode };
-    }
-  }
-
-  const head = parts[idx]?.toLowerCase();
-  if (head && VALID_NAV_TABS.includes(head as NavTab)) {
-    const tab = head as NavTab;
-    let instrumentId: string | undefined;
-    if (tab === 'terminal' && parts[idx + 1]) {
-      const candidate = parts[idx + 1].toUpperCase();
-      if (INSTRUMENTS.some((i) => i.id === candidate)) {
-        instrumentId = candidate;
-      }
-    }
-    return { stage: 'workspace', tab, instrumentId, accountMode };
-  }
-  return null;
-}
-
-function playAlertChime(tone: 'emerald' | 'blue' | 'rose') {
-  try {
-    const AudioCtx =
-      window.AudioContext || (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    const baseFreq = tone === 'emerald' ? 784 : tone === 'blue' ? 659.25 : 440;
-    osc.frequency.setValueAtTime(baseFreq, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(
-      tone === 'rose' ? 330 : baseFreq * 1.25,
-      ctx.currentTime + 0.14
-    );
-    gain.gain.setValueAtTime(0.06, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.22);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + 0.23);
-    window.setTimeout(() => {
-      void ctx.close().catch(() => {});
-    }, 350);
-  } catch {
-    // Ignore autoplay restrictions
-  }
-}
 
 function TerminalWorkspace() {
   const { isDark, toggleTheme } = useTheme();
@@ -268,36 +177,18 @@ function TerminalWorkspace() {
   const [analyzerSubTab, setAnalyzerSubTab] = useState<AnalyzerSubTab>('auto-analyzer');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [soundAlertsEnabled, setSoundAlertsEnabled] = useState<boolean>(() => {
-    try {
-      const saved = window.localStorage.getItem(SOUND_ALERTS_STORAGE_KEY);
-      return saved === null ? true : saved === '1';
-    } catch {
-      return true;
-    }
-  });
-  const soundAlertsRef = useRef(soundAlertsEnabled);
-  soundAlertsRef.current = soundAlertsEnabled;
-  const [toasts, setToasts] = useState<WorkspaceToast[]>([]);
+  const {
+    toasts,
+    setToasts,
+    pushToast,
+    soundAlertsEnabled,
+    setSoundAlertsEnabled,
+  } = useWorkspaceToasts();
   const [liveBrokerBalance, setLiveBrokerBalance] = useState<{
     balance: number;
     currency: string;
     serverName?: string;
   } | null>(null);
-
-  const pushToast = useCallback(
-    (title: string, detail: string, tone: 'emerald' | 'blue' | 'rose' = 'emerald') => {
-      const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      setToasts((prev) => [{ id, title, detail, tone }, ...prev].slice(0, 4));
-      if (soundAlertsRef.current) {
-        playAlertChime(tone);
-      }
-      window.setTimeout(() => {
-        setToasts((prev) => prev.filter((t) => t.id !== id));
-      }, 6000);
-    },
-    []
-  );
 
   // Standalone localStorage state (immediate access without requiring any app connection)
   const [config, setConfig] = useState<StrategyConfig>(() => loadLocalConfig());
@@ -1268,9 +1159,19 @@ function TerminalWorkspace() {
     }
   }, [livePricesBySymbol, config.telegramChannelLabel, pushToast]);
 
+  // Sync kill switch state to the authoritative server-side guard whenever signed-in user or config changes
+  useEffect(() => {
+    if (!user?.emailVerified) return;
+    void authFetch('/api/account/kill-switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ killSwitchActive: Boolean(config.killSwitchActive) }),
+    }).catch(() => {});
+  }, [user, config.killSwitchActive]);
+
   // 24/7 Server-Side Position Monitor Sync & Event Reconciliation (continues monitoring even if tab was closed)
   useEffect(() => {
-    if (viewStage !== 'workspace') return;
+    if (viewStage !== 'workspace' || !user?.emailVerified) return;
 
     const syncServerMonitor = async () => {
       const openList = tradesRef.current.filter((t) => t.status === 'OPEN');
@@ -1615,7 +1516,7 @@ function TerminalWorkspace() {
     setLiveAnalysisError(null);
     setTelegramNote(null);
     try {
-      const res = await fetch('/api/ai/analyze-live', {
+      const res = await authFetch('/api/ai/analyze-live', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2100,7 +2001,7 @@ function TerminalWorkspace() {
   const evaluatePineBotStrategy = useCallback(
     async (strategy: PineStrategyRecord): Promise<PineBotEvaluationResult | null> => {
       try {
-        const res = await fetch('/api/pine/evaluate-live', {
+        const res = await authFetch('/api/pine/evaluate-live', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -2232,8 +2133,9 @@ function TerminalWorkspace() {
     [activeAccountType, config.killSwitchActive, computeSmartRiskQuantity, executeSignalRecord]
   );
 
-  // Background Pine Bot live scanner every 12 seconds for any active bots
+  // Background Pine Bot live scanner every 12 seconds for any active bots (workspace + signed-in only)
   useEffect(() => {
+    if (viewStage !== 'workspace' || !user?.emailVerified) return;
     const activeBots = pineStrategies.filter((s) => s.botEnabled);
     if (activeBots.length === 0) return;
 
@@ -2249,7 +2151,7 @@ function TerminalWorkspace() {
     }, 12_000);
 
     return () => window.clearInterval(timer);
-  }, [pineStrategies, evaluatePineBotStrategy]);
+  }, [viewStage, user, pineStrategies, evaluatePineBotStrategy]);
 
   const handleExecuteSignalInstant = async (sig: GeneratedSignalPayload) => {
     setExecutingInstrumentSymbol(sig.instrument);
@@ -2269,7 +2171,7 @@ function TerminalWorkspace() {
   const runAutoScanAndExecute = useCallback(async () => {
     setAutoScanLoading(true);
     try {
-      const res = await fetch('/api/ai/auto-scan', {
+      const res = await authFetch('/api/ai/auto-scan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2990,7 +2892,7 @@ function TerminalWorkspace() {
               userEmail={user?.email || ''}
               isSignedIn={Boolean(user)}
               onSignIn={() => handleSignIn('GENERAL')}
-              onSignOut={signOutUser}
+              onSignOut={handleSignOut}
               wallet={demoWallet}
               onAddWalletFunds={async (amt, note) => {
                 if (user) {
@@ -3012,6 +2914,11 @@ function TerminalWorkspace() {
                 const next = { ...rest, killSwitchActive: !config.killSwitchActive };
                 if (user) {
                   await saveStrategyConfig(user.uid, next);
+                  void authFetch('/api/account/kill-switch', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ killSwitchActive: next.killSwitchActive }),
+                  }).catch(() => {});
                 } else {
                   setConfig(saveLocalConfig(next));
                 }

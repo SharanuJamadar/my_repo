@@ -183,7 +183,7 @@
         "target2": { "type": "number" },
         "target3": { "type": "number" },
         "executionMode": { "type": "string", "enum": ["PAPER", "LIVE"] },
-        "brokerName": { "type": "string", "maxLength": 60 },
+        "brokerName": { "type": "string", "maxLength": 80 },
         "brokerOrderId": { "type": "string", "maxLength": 80 },
         "status": { "type": "string", "enum": ["CONFIRMED_PAPER", "SUBMITTED_LIVE", "REJECTED", "KILLED"] },
         "createdAt": { "type": "string", "format": "date-time" },

@@ -1,4 +1,6 @@
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import type { Express, Request, Response } from 'express';
 
 export interface BrokerOAuthSession {
@@ -9,18 +11,19 @@ export interface BrokerOAuthSession {
   expiresAt: number;
   method: 'OAUTH_SESSION';
   tokenPreview: string;
-  /** Stored strictly in server memory; never sent to browser */
+  /** Stored strictly server-side (AES-256-GCM encrypted at rest); never sent to browser */
   accessToken: string;
+  refreshToken?: string;
 }
 
-interface PendingOAuthState {
+export interface PendingOAuthState {
   brokerId: string;
   userId: string;
   createdAt: number;
   expiresAt: number;
 }
 
-interface BrokerOAuthSpec {
+export interface BrokerOAuthSpec {
   id: string;
   name: string;
   supportsOAuth: boolean;
@@ -32,11 +35,115 @@ interface BrokerOAuthSpec {
   exchangeCode?: (params: {
     code: string;
     callbackUrl: string;
-  }) => Promise<{ accessToken: string; expiresInSec?: number }>;
+  }) => Promise<{ accessToken: string; refreshToken?: string; expiresInSec?: number }>;
 }
 
 const pendingStates = new Map<string, PendingOAuthState>();
 const activeSessions = new Map<string, BrokerOAuthSession>();
+
+// AES-256-GCM encrypted persistence store so OAuth sessions survive restarts
+const STORE_DIR = path.resolve(process.cwd(), '.data');
+const STORE_FILE = path.join(STORE_DIR, 'broker-oauth-sessions.enc.json');
+let ephemeralFallbackKey: Buffer | null = null;
+
+function getEncryptionKey(): Buffer {
+  const raw = process.env.BROKER_SESSION_ENCRYPTION_KEY?.trim();
+  if (raw && raw.length >= 16) {
+    return crypto.createHash('sha256').update(raw).digest();
+  }
+  if (!ephemeralFallbackKey) {
+    // Deterministic per-process fallback only when env secret is not set
+    const seed = process.env.APP_URL || process.env.FIREBASE_PROJECT_ID || crypto.randomBytes(32).toString('hex');
+    ephemeralFallbackKey = crypto.createHash('sha256').update(`mytrade-oauth-v1:${seed}`).digest();
+  }
+  return ephemeralFallbackKey;
+}
+
+export function encryptStorePayload(plaintext: string, keyOverride?: Buffer): string {
+  const key = keyOverride || getEncryptionKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const encrypted = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+  return JSON.stringify({
+    v: 1,
+    iv: iv.toString('base64'),
+    tag: authTag.toString('base64'),
+    data: encrypted.toString('base64'),
+  });
+}
+
+export function decryptStorePayload(serialized: string, keyOverride?: Buffer): string | null {
+  try {
+    const parsed = JSON.parse(serialized) as {
+      v?: number;
+      iv?: string;
+      tag?: string;
+      data?: string;
+    };
+    if (parsed.v !== 1 || !parsed.iv || !parsed.tag || !parsed.data) return null;
+    const key = keyOverride || getEncryptionKey();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(parsed.iv, 'base64'));
+    decipher.setAuthTag(Buffer.from(parsed.tag, 'base64'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(parsed.data, 'base64')),
+      decipher.final(),
+    ]);
+    return decrypted.toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
+function loadEncryptedStore() {
+  try {
+    if (!fs.existsSync(STORE_FILE)) return;
+    const raw = fs.readFileSync(STORE_FILE, 'utf8');
+    const decrypted = decryptStorePayload(raw);
+    if (!decrypted) return;
+    const snapshot = JSON.parse(decrypted) as {
+      pendingStates?: Array<[string, PendingOAuthState]>;
+      activeSessions?: Array<[string, BrokerOAuthSession]>;
+    };
+    const now = Date.now();
+    if (Array.isArray(snapshot.pendingStates)) {
+      for (const [k, v] of snapshot.pendingStates) {
+        if (v && v.expiresAt > now && v.userId && v.userId !== 'guest') {
+          pendingStates.set(k, v);
+        }
+      }
+    }
+    if (Array.isArray(snapshot.activeSessions)) {
+      for (const [k, v] of snapshot.activeSessions) {
+        if (v && v.expiresAt > now && v.userId && v.userId !== 'guest') {
+          activeSessions.set(k, v);
+        }
+      }
+    }
+  } catch {
+    // Ignore unreadable or rotated-key store files
+  }
+}
+
+function persistEncryptedStore() {
+  try {
+    pruneExpiredOAuthState();
+    fs.mkdirSync(STORE_DIR, { recursive: true, mode: 0o700 });
+    const serialized = encryptStorePayload(
+      JSON.stringify({
+        pendingStates: Array.from(pendingStates.entries()),
+        activeSessions: Array.from(activeSessions.entries()),
+      })
+    );
+    const tmpFile = `${STORE_FILE}.tmp`;
+    fs.writeFileSync(tmpFile, serialized, { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmpFile, STORE_FILE);
+  } catch {
+    // Non-fatal in read-only filesystem environments
+  }
+}
+
+loadEncryptedStore();
 
 function pruneExpiredOAuthState(now = Date.now()) {
   for (const [key, entry] of pendingStates.entries()) {
@@ -60,8 +167,38 @@ export function getCanonicalAppUrl(): string {
   return `http://localhost:${port}`;
 }
 
+export function getCanonicalAppOrigin(): string {
+  try {
+    return new URL(getCanonicalAppUrl()).origin;
+  } catch {
+    return 'http://localhost:3000';
+  }
+}
+
 export function getBrokerCallbackUrl(brokerId: string): string {
   return `${getCanonicalAppUrl()}/auth/broker/callback/${encodeURIComponent(brokerId)}`;
+}
+
+/**
+ * Pure single-use CSRF state validation helper (also unit-tested).
+ * Always rejects missing, expired, mismatched, or guest states.
+ */
+export function consumePendingOAuthState(
+  stateParam: string,
+  brokerId: string,
+  store: Map<string, PendingOAuthState> = pendingStates,
+  now = Date.now()
+): PendingOAuthState | null {
+  if (!stateParam || typeof stateParam !== 'string' || stateParam.length < 16) {
+    return null;
+  }
+  const pending = store.get(stateParam);
+  if (!pending) return null;
+  store.delete(stateParam);
+  if (pending.expiresAt <= now) return null;
+  if (pending.brokerId !== brokerId) return null;
+  if (!pending.userId || pending.userId === 'guest') return null;
+  return pending;
 }
 
 const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
@@ -72,10 +209,15 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     portalUrl: 'https://kite.zerodha.com/',
     developerPortalUrl: 'https://developers.kite.trade/apps',
     requiredEnvVars: ['KITE_API_KEY', 'KITE_API_SECRET'],
-    isEnvConfigured: () => Boolean(process.env.KITE_API_KEY && process.env.KITE_ACCESS_TOKEN),
+    isEnvConfigured: () =>
+      Boolean(
+        (process.env.KITE_API_KEY && process.env.KITE_API_SECRET) ||
+          (process.env.KITE_API_KEY && process.env.KITE_ACCESS_TOKEN)
+      ),
     buildAuthUrl: (_callbackUrl, state) => {
       const apiKey = process.env.KITE_API_KEY?.trim();
-      if (!apiKey) return null;
+      const apiSecret = process.env.KITE_API_SECRET?.trim();
+      if (!apiKey || !apiSecret) return null;
       const params = new URLSearchParams({
         v: '3',
         api_key: apiKey,
@@ -87,7 +229,9 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
       const apiKey = process.env.KITE_API_KEY?.trim() || '';
       const apiSecret = process.env.KITE_API_SECRET?.trim() || '';
       if (!apiKey || !apiSecret) {
-        return { accessToken: code, expiresInSec: 43_200 };
+        throw new Error(
+          'Zerodha Kite OAuth requires KITE_API_KEY and KITE_API_SECRET configured on the server.'
+        );
       }
       const checksum = crypto
         .createHash('sha256')
@@ -126,10 +270,15 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     portalUrl: 'https://login.upstox.com/',
     developerPortalUrl: 'https://account.upstox.com/developer/apps',
     requiredEnvVars: ['UPSTOX_API_KEY', 'UPSTOX_API_SECRET'],
-    isEnvConfigured: () => Boolean(process.env.UPSTOX_ACCESS_TOKEN),
+    isEnvConfigured: () =>
+      Boolean(
+        (process.env.UPSTOX_API_KEY && process.env.UPSTOX_API_SECRET) ||
+          process.env.UPSTOX_ACCESS_TOKEN
+      ),
     buildAuthUrl: (callbackUrl, state) => {
       const clientId = process.env.UPSTOX_API_KEY?.trim();
-      if (!clientId) return null;
+      const clientSecret = process.env.UPSTOX_API_SECRET?.trim();
+      if (!clientId || !clientSecret) return null;
       const params = new URLSearchParams({
         response_type: 'code',
         client_id: clientId,
@@ -141,6 +290,9 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     exchangeCode: async ({ code, callbackUrl }) => {
       const clientId = process.env.UPSTOX_API_KEY?.trim() || '';
       const clientSecret = process.env.UPSTOX_API_SECRET?.trim() || '';
+      if (!clientId || !clientSecret) {
+        throw new Error('Upstox OAuth requires UPSTOX_API_KEY and UPSTOX_API_SECRET.');
+      }
       const body = new URLSearchParams({
         code,
         client_id: clientId,
@@ -175,10 +327,15 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     portalUrl: 'https://trade.fyers.in/',
     developerPortalUrl: 'https://myapi.fyers.in/dashboard',
     requiredEnvVars: ['FYERS_APP_ID', 'FYERS_SECRET_ID'],
-    isEnvConfigured: () => Boolean(process.env.FYERS_APP_ID && process.env.FYERS_ACCESS_TOKEN),
+    isEnvConfigured: () =>
+      Boolean(
+        (process.env.FYERS_APP_ID && process.env.FYERS_SECRET_ID) ||
+          (process.env.FYERS_APP_ID && process.env.FYERS_ACCESS_TOKEN)
+      ),
     buildAuthUrl: (callbackUrl, state) => {
       const appId = process.env.FYERS_APP_ID?.trim();
-      if (!appId) return null;
+      const secretId = process.env.FYERS_SECRET_ID?.trim();
+      if (!appId || !secretId) return null;
       const params = new URLSearchParams({
         client_id: appId,
         redirect_uri: callbackUrl,
@@ -190,6 +347,9 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     exchangeCode: async ({ code }) => {
       const appId = process.env.FYERS_APP_ID?.trim() || '';
       const secretId = process.env.FYERS_SECRET_ID?.trim() || '';
+      if (!appId || !secretId) {
+        throw new Error('Fyers OAuth requires FYERS_APP_ID and FYERS_SECRET_ID.');
+      }
       const appIdHash = crypto.createHash('sha256').update(`${appId}:${secretId}`).digest('hex');
       const res = await fetch('https://api-t1.fyers.in/api/v3/validate-authcode', {
         method: 'POST',
@@ -203,12 +363,17 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
       });
       const data = (await res.json().catch(() => ({}))) as {
         access_token?: string;
+        refresh_token?: string;
         message?: string;
       };
       if (!res.ok || !data?.access_token) {
         throw new Error(data?.message || `Fyers token validation failed (HTTP ${res.status})`);
       }
-      return { accessToken: data.access_token, expiresInSec: 43_200 };
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresInSec: 43_200,
+      };
     },
   },
 
@@ -234,12 +399,11 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
   DHAN: {
     id: 'DHAN',
     name: 'Dhan',
-    supportsOAuth: true,
+    supportsOAuth: false,
     portalUrl: 'https://web.dhan.co/',
     developerPortalUrl: 'https://web.dhan.co/index/home',
     requiredEnvVars: ['DHAN_CLIENT_ID', 'DHAN_ACCESS_TOKEN'],
     isEnvConfigured: () => Boolean(process.env.DHAN_CLIENT_ID && process.env.DHAN_ACCESS_TOKEN),
-    buildAuthUrl: () => null,
   },
 
   GROWW: {
@@ -262,7 +426,8 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     isEnvConfigured: () => Boolean(process.env.ALICEBLUE_APP_CODE && process.env.ALICEBLUE_API_SECRET),
     buildAuthUrl: (_callbackUrl, state) => {
       const appCode = process.env.ALICEBLUE_APP_CODE?.trim();
-      if (!appCode) return null;
+      const secret = process.env.ALICEBLUE_API_SECRET?.trim();
+      if (!appCode || !secret) return null;
       const params = new URLSearchParams({ appcode: appCode, state });
       return `https://ant.aliceblueonline.com/?${params.toString()}`;
     },
@@ -278,7 +443,8 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     isEnvConfigured: () => Boolean(process.env.FIVEPAISA_VENDOR_KEY && process.env.FIVEPAISA_APP_SECRET),
     buildAuthUrl: (callbackUrl, state) => {
       const vendorKey = process.env.FIVEPAISA_VENDOR_KEY?.trim();
-      if (!vendorKey) return null;
+      const secret = process.env.FIVEPAISA_APP_SECRET?.trim();
+      if (!vendorKey || !secret) return null;
       const params = new URLSearchParams({
         VendorKey: vendorKey,
         ResponseURL: callbackUrl,
@@ -318,7 +484,8 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     isEnvConfigured: () => Boolean(process.env.CTRADER_CLIENT_ID && process.env.CTRADER_CLIENT_SECRET),
     buildAuthUrl: (callbackUrl, state) => {
       const clientId = process.env.CTRADER_CLIENT_ID?.trim();
-      if (!clientId) return null;
+      const clientSecret = process.env.CTRADER_CLIENT_SECRET?.trim();
+      if (!clientId || !clientSecret) return null;
       const params = new URLSearchParams({
         client_id: clientId,
         redirect_uri: callbackUrl,
@@ -331,26 +498,40 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     exchangeCode: async ({ code, callbackUrl }) => {
       const clientId = process.env.CTRADER_CLIENT_ID?.trim() || '';
       const clientSecret = process.env.CTRADER_CLIENT_SECRET?.trim() || '';
-      const params = new URLSearchParams({
+      if (!clientId || !clientSecret) {
+        throw new Error('cTrader OAuth requires CTRADER_CLIENT_ID and CTRADER_CLIENT_SECRET.');
+      }
+      // Always transmit client_secret in POST form body, never in a GET query string
+      const body = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
         redirect_uri: callbackUrl,
         client_id: clientId,
         client_secret: clientSecret,
       });
-      const res = await fetch(`https://openapi.ctrader.com/apps/token?${params.toString()}`, {
-        method: 'GET',
+      const res = await fetch('https://openapi.ctrader.com/apps/token', {
+        method: 'POST',
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
         signal: AbortSignal.timeout(10_000),
       });
       const data = (await res.json().catch(() => ({}))) as {
         accessToken?: string;
+        refreshToken?: string;
         expiresIn?: number;
         description?: string;
       };
       if (!res.ok || !data?.accessToken) {
         throw new Error(data?.description || `cTrader token exchange failed (HTTP ${res.status})`);
       }
-      return { accessToken: data.accessToken, expiresInSec: Number(data.expiresIn) || 86_400 };
+      return {
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        expiresInSec: Number(data.expiresIn) || 86_400,
+      };
     },
   },
 
@@ -378,7 +559,8 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
       ),
     buildAuthUrl: (callbackUrl, state) => {
       const clientId = process.env.ALPACA_CLIENT_ID?.trim();
-      if (!clientId) return null;
+      const clientSecret = process.env.ALPACA_CLIENT_SECRET?.trim();
+      if (!clientId || !clientSecret) return null;
       const params = new URLSearchParams({
         response_type: 'code',
         client_id: clientId,
@@ -391,6 +573,9 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     exchangeCode: async ({ code, callbackUrl }) => {
       const clientId = process.env.ALPACA_CLIENT_ID?.trim() || '';
       const clientSecret = process.env.ALPACA_CLIENT_SECRET?.trim() || '';
+      if (!clientId || !clientSecret) {
+        throw new Error('Alpaca OAuth requires ALPACA_CLIENT_ID and ALPACA_CLIENT_SECRET.');
+      }
       const body = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
@@ -406,12 +591,17 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
       });
       const data = (await res.json().catch(() => ({}))) as {
         access_token?: string;
+        refresh_token?: string;
         error_description?: string;
       };
       if (!res.ok || !data?.access_token) {
         throw new Error(data?.error_description || `Alpaca token exchange failed (HTTP ${res.status})`);
       }
-      return { accessToken: data.access_token, expiresInSec: 86_400 };
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresInSec: 86_400,
+      };
     },
   },
 
@@ -455,7 +645,8 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     isEnvConfigured: () => Boolean(process.env.COINBASE_CLIENT_ID && process.env.COINBASE_CLIENT_SECRET),
     buildAuthUrl: (callbackUrl, state) => {
       const clientId = process.env.COINBASE_CLIENT_ID?.trim();
-      if (!clientId) return null;
+      const clientSecret = process.env.COINBASE_CLIENT_SECRET?.trim();
+      if (!clientId || !clientSecret) return null;
       const params = new URLSearchParams({
         response_type: 'code',
         client_id: clientId,
@@ -468,6 +659,9 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     exchangeCode: async ({ code, callbackUrl }) => {
       const clientId = process.env.COINBASE_CLIENT_ID?.trim() || '';
       const clientSecret = process.env.COINBASE_CLIENT_SECRET?.trim() || '';
+      if (!clientId || !clientSecret) {
+        throw new Error('Coinbase OAuth requires COINBASE_CLIENT_ID and COINBASE_CLIENT_SECRET.');
+      }
       const body = new URLSearchParams({
         grant_type: 'authorization_code',
         code,
@@ -483,13 +677,18 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
       });
       const data = (await res.json().catch(() => ({}))) as {
         access_token?: string;
+        refresh_token?: string;
         expires_in?: number;
         error_description?: string;
       };
       if (!res.ok || !data?.access_token) {
         throw new Error(data?.error_description || `Coinbase token exchange failed (HTTP ${res.status})`);
       }
-      return { accessToken: data.access_token, expiresInSec: Number(data.expires_in) || 7_200 };
+      return {
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresInSec: Number(data.expires_in) || 7_200,
+      };
     },
   },
 
@@ -503,6 +702,10 @@ const BROKER_OAUTH_SPECS: Record<string, BrokerOAuthSpec> = {
     isEnvConfigured: () => Boolean(process.env.TRADINGVIEW_WEBHOOK_SECRET),
   },
 };
+
+export function getBrokerSpec(brokerId: string): BrokerOAuthSpec | undefined {
+  return BROKER_OAUTH_SPECS[brokerId.toUpperCase().trim()];
+}
 
 function escapeHtml(raw: string): string {
   return raw
@@ -527,6 +730,8 @@ function renderOAuthCallbackPage(payload: {
     message: payload.message,
     connectedAt: payload.connectedAt || new Date().toISOString(),
   }).replace(/</g, '\\u003c');
+
+  const safeTargetOriginJson = JSON.stringify(getCanonicalAppOrigin()).replace(/</g, '\\u003c');
 
   const safeTitle = escapeHtml(
     payload.ok ? `${payload.brokerName} Connected` : `${payload.brokerName} Connection Failed`
@@ -594,9 +799,10 @@ function renderOAuthCallbackPage(payload: {
     <script>
       (function () {
         var data = ${safePayloadJson};
+        var targetOrigin = ${safeTargetOriginJson};
         try {
           if (window.opener && !window.opener.closed) {
-            window.opener.postMessage(data, '*');
+            window.opener.postMessage(data, targetOrigin);
             setTimeout(function () { window.close(); }, 600);
           } else {
             setTimeout(function () { window.location.href = '/'; }, 1800);
@@ -615,9 +821,7 @@ export function getAllBrokerReadiness(userId?: string): Record<string, boolean> 
   const map: Record<string, boolean> = { PAPER_ENGINE: true };
 
   for (const spec of Object.values(BROKER_OAUTH_SPECS)) {
-    const hasSession = Boolean(
-      userId && activeSessions.has(`${userId}:${spec.id}`)
-    );
+    const hasSession = Boolean(userId && activeSessions.has(`${userId}:${spec.id}`));
     map[spec.id] = spec.isEnvConfigured() || hasSession;
   }
 
@@ -657,7 +861,7 @@ export function registerBrokerOAuthRoutes(
   // List all broker OAuth/Env connection metadata for the current user
   app.get('/api/brokers/connections', async (req: Request, res: Response) => {
     const verifiedUser = await verifyUser(req);
-    const userId = verifiedUser?.uid;
+    const userId = verifiedUser?.emailVerified ? verifiedUser.uid : undefined;
     const readiness = getAllBrokerReadiness(userId);
     const oauthSessions = userId ? getActiveBrokerOAuthSessionsForUser(userId) : [];
 
@@ -686,7 +890,7 @@ export function registerBrokerOAuthRoutes(
     });
   });
 
-  // Construct external OAuth authorization URL (or return portal redirect metadata)
+  // Construct external OAuth authorization URL (requires verified user before issuing CSRF state)
   app.get('/api/brokers/oauth/url/:brokerId', async (req: Request, res: Response) => {
     pruneExpiredOAuthState();
     const brokerId = String(req.params.brokerId || '').toUpperCase().trim();
@@ -697,18 +901,29 @@ export function registerBrokerOAuthRoutes(
     }
 
     const verifiedUser = await verifyUser(req);
-    const userId = verifiedUser?.uid || 'guest';
     const callbackUrl = getBrokerCallbackUrl(spec.id);
-    const state = crypto.randomBytes(20).toString('hex');
+    const probeAuthUrl = spec.supportsOAuth && spec.buildAuthUrl ? spec.buildAuthUrl(callbackUrl, 'probe') : null;
 
-    const authUrl = spec.supportsOAuth && spec.buildAuthUrl ? spec.buildAuthUrl(callbackUrl, state) : null;
-    if (authUrl) {
-      pendingStates.set(state, {
-        brokerId: spec.id,
-        userId,
-        createdAt: Date.now(),
-        expiresAt: Date.now() + 10 * 60_000,
+    if (probeAuthUrl && (!verifiedUser || !verifiedUser.emailVerified)) {
+      res.status(401).json({
+        error: 'Verified Google Sign-In is required before connecting a live broker via OAuth.',
       });
+      return;
+    }
+
+    let authUrl: string | null = null;
+    if (probeAuthUrl && verifiedUser) {
+      const state = crypto.randomBytes(24).toString('hex');
+      authUrl = spec.buildAuthUrl!(callbackUrl, state);
+      if (authUrl) {
+        pendingStates.set(state, {
+          brokerId: spec.id,
+          userId: verifiedUser.uid,
+          createdAt: Date.now(),
+          expiresAt: Date.now() + 10 * 60_000,
+        });
+        persistEncryptedStore();
+      }
     }
 
     res.json({
@@ -728,17 +943,20 @@ export function registerBrokerOAuthRoutes(
   // Disconnect an active OAuth broker session for the authenticated user
   app.delete('/api/brokers/connections/:brokerId', async (req: Request, res: Response) => {
     const verifiedUser = await verifyUser(req);
-    if (!verifiedUser) {
-      res.status(401).json({ ok: false, error: 'Sign in required to manage broker OAuth sessions.' });
+    if (!verifiedUser || !verifiedUser.emailVerified) {
+      res.status(401).json({ ok: false, error: 'Verified sign in required to manage broker OAuth sessions.' });
       return;
     }
     const brokerId = String(req.params.brokerId || '').toUpperCase().trim();
     const key = `${verifiedUser.uid}:${brokerId}`;
     const removed = activeSessions.delete(key);
+    if (removed) {
+      persistEncryptedStore();
+    }
     res.json({ ok: true, removed, brokerId });
   });
 
-  // Universal OAuth callback route (handles both with and without trailing slash)
+  // Universal OAuth callback route — STRICT mandatory CSRF state verification (no guest slot!)
   const handleOAuthCallback = async (req: Request, res: Response) => {
     pruneExpiredOAuthState();
     const brokerId = String(req.params.brokerId || '').toUpperCase().trim();
@@ -791,24 +1009,25 @@ export function registerBrokerOAuthRoutes(
       (typeof req.query.State === 'string' && req.query.State.trim()) ||
       '';
 
-    const pending = stateParam ? pendingStates.get(stateParam) : undefined;
-    if (stateParam) {
-      if (!pending || pending.brokerId !== spec.id) {
-        res
-          .status(400)
-          .type('text/html')
-          .send(
-            renderOAuthCallbackPage({
-              ok: false,
-              brokerId: spec.id,
-              brokerName: spec.name,
-              message: 'OAuth session expired or invalid state token. Please restart the connection from My Trade.',
-            })
-          );
-        return;
-      }
-      pendingStates.delete(stateParam);
+    // Mandatory CSRF state check — missing, invalid, or expired state is ALWAYS rejected
+    const pending = consumePendingOAuthState(stateParam, spec.id);
+    if (!pending) {
+      res
+        .status(400)
+        .type('text/html')
+        .send(
+          renderOAuthCallbackPage({
+            ok: false,
+            brokerId: spec.id,
+            brokerName: spec.name,
+            message:
+              'Missing, expired, or invalid OAuth state token. Please restart the connection from My Trade while signed in.',
+          })
+        );
+      return;
     }
+
+    persistEncryptedStore();
 
     if (!authCode) {
       res
@@ -828,17 +1047,19 @@ export function registerBrokerOAuthRoutes(
     try {
       const callbackUrl = getBrokerCallbackUrl(spec.id);
       let accessToken = authCode;
+      let refreshToken: string | undefined;
       let expiresInSec = 43_200;
 
       if (spec.exchangeCode) {
         const exchanged = await spec.exchangeCode({ code: authCode, callbackUrl });
         accessToken = exchanged.accessToken;
+        refreshToken = exchanged.refreshToken;
         if (exchanged.expiresInSec) {
           expiresInSec = exchanged.expiresInSec;
         }
       }
 
-      const userId = pending?.userId || 'guest';
+      const userId = pending.userId;
       const connectedAt = new Date().toISOString();
       const tokenPreview =
         accessToken.length >= 6
@@ -854,7 +1075,9 @@ export function registerBrokerOAuthRoutes(
         method: 'OAUTH_SESSION',
         tokenPreview,
         accessToken,
+        refreshToken,
       });
+      persistEncryptedStore();
 
       res
         .status(200)

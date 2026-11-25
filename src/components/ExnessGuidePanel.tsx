@@ -32,7 +32,7 @@ export const ExnessGuidePanel: React.FC<ExnessGuidePanelProps> = ({
 
   const loadStatus = async () => {
     try {
-      const res = await fetch('/api/brokers/exness/status');
+      const res = await authFetch('/api/brokers/exness/status');
       if (res.ok) {
         const data = (await res.json()) as ExnessStatusResponse;
         setStatus(data);

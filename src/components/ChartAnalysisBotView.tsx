@@ -7,6 +7,7 @@ import {
   type Timeframe,
 } from '../types/trading';
 import { SignalCard } from './SignalCard';
+import { authFetch } from '../lib/authFetch';
 
 interface ChartAnalysisBotViewProps {
   config: StrategyConfig;
@@ -44,8 +45,8 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
       setError('Please upload a valid PNG, JPG, or WebP chart screenshot.');
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Chart image must be under 10 MB.');
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Chart image must be under 5 MB.');
       return;
     }
     setError(null);
@@ -70,7 +71,7 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
     setTgNote(null);
     setAnalyzing(true);
     try {
-      const res = await fetch('/api/ai/analyze-chart', {
+      const res = await authFetch('/api/ai/analyze-chart', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -139,7 +140,7 @@ export const ChartAnalysisBotView: React.FC<ChartAnalysisBotViewProps> = ({
                 Click or drag & drop TradingView chart screenshot
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-                PNG, JPG, WebP up to 10 MB · Candlestick, EMA, VWAP, or Volume charts
+                PNG, JPG, WebP up to 5 MB · Candlestick, EMA, VWAP, or Volume charts
               </p>
             </button>
           ) : (

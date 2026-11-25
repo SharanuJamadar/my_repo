@@ -6,11 +6,9 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import {
-  DEFAULT_STRATEGY_CONFIG,
   INSTRUMENTS,
   type LiveMarketNewsResponse,
   type MarketNewsCategory,
-  type StrategyConfig,
   type Timeframe,
 } from './src/types/trading.ts';
 import {
@@ -25,6 +23,7 @@ import {
   analyzeUploadedChartWithGemini,
   chatWithTradingAssistant,
   enhanceLiveAnalysisWithGemini,
+  normalizeGeminiError,
 } from './server/geminiService.ts';
 import { fetchFreeLiveMarketNews } from './server/newsService.ts';
 import { getEconomicCalendarSnapshot } from './server/economicCalendarService.ts';
@@ -39,12 +38,22 @@ import {
   getAllBrokerReadiness,
   registerBrokerOAuthRoutes,
 } from './server/brokerOAuth.ts';
+import {
+  BoundedTtlCache,
+  SlidingWindowRateLimiter,
+  isAuthorizedOperator,
+  resolveAndValidateBridgeUrl,
+  sanitizeConfig,
+  validateExnessBridgeUrl,
+  type VerifiedUserLike,
+} from './server/securityGuards.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-app.use(express.json({ limit: '15mb' }));
+// Tightened global JSON payload limit (8MB allows ~5MB base64 chart screenshot safely)
+app.use(express.json({ limit: '8mb' }));
 
 // Duplicate order guard cache (userId:signalId:side -> timestamp) with automatic TTL pruning
 const recentOrderCache = new Map<string, number>();
@@ -57,11 +66,71 @@ function pruneRecentOrderCache(now = Date.now()) {
   }
 }
 
+// Server-side kill-switch state per authenticated user (persisted safely in .data/)
+const KILL_SWITCH_DIR = path.resolve(process.cwd(), '.data');
+const KILL_SWITCH_FILE = path.join(KILL_SWITCH_DIR, 'kill-switches.json');
+const serverKillSwitchByUser = new Map<string, boolean>();
+
+function loadKillSwitchState() {
+  try {
+    if (!fs.existsSync(KILL_SWITCH_FILE)) return;
+    const raw = JSON.parse(fs.readFileSync(KILL_SWITCH_FILE, 'utf8')) as Record<string, boolean>;
+    if (raw && typeof raw === 'object') {
+      for (const [uid, active] of Object.entries(raw)) {
+        if (typeof active === 'boolean') {
+          serverKillSwitchByUser.set(uid, active);
+        }
+      }
+    }
+  } catch {
+    // Ignore unreadable state file
+  }
+}
+
+function saveKillSwitchState() {
+  try {
+    fs.mkdirSync(KILL_SWITCH_DIR, { recursive: true, mode: 0o700 });
+    const obj: Record<string, boolean> = {};
+    for (const [uid, active] of serverKillSwitchByUser.entries()) {
+      obj[uid] = active;
+    }
+    const tmp = `${KILL_SWITCH_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(obj), { encoding: 'utf8', mode: 0o600 });
+    fs.renameSync(tmp, KILL_SWITCH_FILE);
+  } catch {
+    // Non-fatal in read-only filesystem
+  }
+}
+
+loadKillSwitchState();
+
+// Per-user rate limiter for AI, Pine, and execution routes
+const rateLimiter = new SlidingWindowRateLimiter(2000);
+
+function enforceRateLimit(
+  req: Request,
+  res: Response,
+  bucketKey: string,
+  limit: number,
+  windowMs: number
+): boolean {
+  const verdict = rateLimiter.consume(bucketKey, limit, windowMs);
+  if (!verdict.allowed) {
+    res.setHeader('Retry-After', String(verdict.retryAfterSec));
+    res.status(429).json({
+      error: `Rate limit exceeded. Please retry in ${verdict.retryAfterSec}s.`,
+    });
+    return false;
+  }
+  return true;
+}
+
 // Cryptographic Firebase Auth ID token verifier (uses Google's public X.509 certs, zero IAM needed)
-interface VerifiedFirebaseUser {
+interface VerifiedFirebaseUser extends VerifiedUserLike {
   uid: string;
   email?: string;
   emailVerified: boolean;
+  isAdminClaim: boolean;
 }
 
 const FIREBASE_CERTS_URL =
@@ -72,7 +141,7 @@ let cachedFirebaseCerts: { certs: Record<string, string>; expiresAt: number } | 
 function getFirebaseProjectId(): string {
   if (cachedFirebaseProjectId) return cachedFirebaseProjectId;
   try {
-    const cfgPath = path.resolve(__dirname, 'firebase-applet-config.json');
+    const cfgPath = path.resolve(process.cwd(), 'firebase-applet-config.json');
     const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8')) as { projectId?: string };
     cachedFirebaseProjectId = raw.projectId || process.env.FIREBASE_PROJECT_ID || '';
   } catch {
@@ -121,6 +190,8 @@ async function verifyFirebaseRequestUser(req: Request): Promise<VerifiedFirebase
       iat?: number;
       email?: string;
       email_verified?: boolean;
+      admin?: boolean;
+      role?: string;
     };
 
     if (header.alg !== 'RS256' || !header.kid) return null;
@@ -144,106 +215,71 @@ async function verifyFirebaseRequestUser(req: Request): Promise<VerifiedFirebase
       uid: payload.sub,
       email: typeof payload.email === 'string' ? payload.email : undefined,
       emailVerified: payload.email_verified === true,
+      isAdminClaim: payload.admin === true || payload.role === 'admin',
     };
   } catch {
     return null;
   }
 }
 
-function sanitizeConfig(raw: any): StrategyConfig {
-  return {
-    userId: typeof raw?.userId === 'string' ? raw.userId : 'default',
-    emaFast: Number(raw?.emaFast) || DEFAULT_STRATEGY_CONFIG.emaFast,
-    emaMid: Number(raw?.emaMid) || DEFAULT_STRATEGY_CONFIG.emaMid,
-    emaSlow: Number(raw?.emaSlow) || DEFAULT_STRATEGY_CONFIG.emaSlow,
-    rsiPeriod: Number(raw?.rsiPeriod) || DEFAULT_STRATEGY_CONFIG.rsiPeriod,
-    rsiBullishMin: Number(raw?.rsiBullishMin) || DEFAULT_STRATEGY_CONFIG.rsiBullishMin,
-    rsiBearishMax: Number(raw?.rsiBearishMax) || DEFAULT_STRATEGY_CONFIG.rsiBearishMax,
-    trendTimeframe: ['15m', '1h', '4h'].includes(raw?.trendTimeframe)
-      ? raw.trendTimeframe
-      : DEFAULT_STRATEGY_CONFIG.trendTimeframe,
-    entryTimeframe: ['5m', '15m'].includes(raw?.entryTimeframe)
-      ? raw.entryTimeframe
-      : DEFAULT_STRATEGY_CONFIG.entryTimeframe,
-    minSetupScore: Number(raw?.minSetupScore) || DEFAULT_STRATEGY_CONFIG.minSetupScore,
-    minRiskReward: Number(raw?.minRiskReward) || DEFAULT_STRATEGY_CONFIG.minRiskReward,
-    maxRiskPerTradePct: Number(raw?.maxRiskPerTradePct) || DEFAULT_STRATEGY_CONFIG.maxRiskPerTradePct,
-    prioritizeAtmOptions:
-      typeof raw?.prioritizeAtmOptions === 'boolean'
-        ? raw.prioritizeAtmOptions
-        : DEFAULT_STRATEGY_CONFIG.prioritizeAtmOptions,
-    comexCrudeEma9Priority:
-      typeof raw?.comexCrudeEma9Priority === 'boolean'
-        ? raw.comexCrudeEma9Priority
-        : DEFAULT_STRATEGY_CONFIG.comexCrudeEma9Priority,
-    paperTradingOnly:
-      typeof raw?.paperTradingOnly === 'boolean'
-        ? raw.paperTradingOnly
-        : DEFAULT_STRATEGY_CONFIG.paperTradingOnly,
-    autoBroadcastTelegram:
-      typeof raw?.autoBroadcastTelegram === 'boolean'
-        ? raw.autoBroadcastTelegram
-        : DEFAULT_STRATEGY_CONFIG.autoBroadcastTelegram,
-    telegramChannelLabel:
-      typeof raw?.telegramChannelLabel === 'string'
-        ? raw.telegramChannelLabel
-        : DEFAULT_STRATEGY_CONFIG.telegramChannelLabel,
-    dataProviderLabel:
-      typeof raw?.dataProviderLabel === 'string'
-        ? raw.dataProviderLabel
-        : DEFAULT_STRATEGY_CONFIG.dataProviderLabel,
-    brokerProviderLabel:
-      typeof raw?.brokerProviderLabel === 'string'
-        ? raw.brokerProviderLabel.slice(0, 80)
-        : DEFAULT_STRATEGY_CONFIG.brokerProviderLabel,
-    killSwitchActive:
-      typeof raw?.killSwitchActive === 'boolean'
-        ? raw.killSwitchActive
-        : DEFAULT_STRATEGY_CONFIG.killSwitchActive,
-    activeInstruments: Array.isArray(raw?.activeInstruments)
-      ? raw.activeInstruments
-      : DEFAULT_STRATEGY_CONFIG.activeInstruments,
-    adxMinThreshold: Math.max(
-      10,
-      Math.min(50, Number(raw?.adxMinThreshold ?? DEFAULT_STRATEGY_CONFIG.adxMinThreshold))
-    ),
-    enableSessionFilter:
-      typeof raw?.enableSessionFilter === 'boolean'
-        ? raw.enableSessionFilter
-        : DEFAULT_STRATEGY_CONFIG.enableSessionFilter,
-    pauseOnHighImpactNews:
-      typeof raw?.pauseOnHighImpactNews === 'boolean'
-        ? raw.pauseOnHighImpactNews
-        : DEFAULT_STRATEGY_CONFIG.pauseOnHighImpactNews,
-    enablePartialProfitBooking:
-      typeof raw?.enablePartialProfitBooking === 'boolean'
-        ? raw.enablePartialProfitBooking
-        : DEFAULT_STRATEGY_CONFIG.enablePartialProfitBooking,
-    dailyMaxLossPct: Math.max(
-      0.5,
-      Math.min(25, Number(raw?.dailyMaxLossPct ?? DEFAULT_STRATEGY_CONFIG.dailyMaxLossPct))
-    ),
-    dailyProfitTargetPct: Math.max(
-      1,
-      Math.min(50, Number(raw?.dailyProfitTargetPct ?? DEFAULT_STRATEGY_CONFIG.dailyProfitTargetPct))
-    ),
-  };
+async function requireVerifiedUser(
+  req: Request,
+  res: Response,
+  message = 'Verified Google Sign-In is required to access this endpoint.'
+): Promise<VerifiedFirebaseUser | null> {
+  const user = await verifyFirebaseRequestUser(req);
+  if (!user || !user.emailVerified) {
+    res.status(401).json({ error: message });
+    return null;
+  }
+  return user;
+}
+
+async function requireOperator(
+  req: Request,
+  res: Response,
+  message = 'Operator / account owner authorization is required for this live action.'
+): Promise<VerifiedFirebaseUser | null> {
+  const user = await verifyFirebaseRequestUser(req);
+  if (!user || !user.emailVerified) {
+    res.status(401).json({ error: 'Verified Google Sign-In is required.' });
+    return null;
+  }
+  if (!isAuthorizedOperator(user)) {
+    res.status(403).json({ error: message });
+    return null;
+  }
+  return user;
 }
 
 app.get('/api/health', (_req: Request, res: Response) => {
   res.json({ ok: true, service: 'My Trade', timestamp: new Date().toISOString() });
 });
 
-app.get('/.well-known/assetlinks.json', (req: Request, res: Response) => {
-  const pkg =
-    typeof req.query.packageName === 'string' && /^[a-zA-Z][a-zA-Z0-9_.]*$/.test(req.query.packageName)
-      ? req.query.packageName
-      : process.env.PLAYSTORE_PACKAGE_NAME || 'com.mytrade.terminal';
+// Server-side per-user Kill Switch endpoint (source of truth for order execution guard)
+app.get('/api/account/kill-switch', async (req: Request, res: Response) => {
+  const user = await requireVerifiedUser(req, res);
+  if (!user) return;
+  res.json({
+    killSwitchActive: serverKillSwitchByUser.get(user.uid) === true,
+  });
+});
+
+app.post('/api/account/kill-switch', async (req: Request, res: Response) => {
+  const user = await requireVerifiedUser(req, res);
+  if (!user) return;
+  const active = Boolean(req.body?.killSwitchActive);
+  serverKillSwitchByUser.set(user.uid, active);
+  saveKillSwitchState();
+  res.json({ ok: true, killSwitchActive: active });
+});
+
+// Serve static, server-configured Android Digital Asset Links ONLY (never reflect req.query)
+app.get('/.well-known/assetlinks.json', (_req: Request, res: Response) => {
+  const pkg = process.env.PLAYSTORE_PACKAGE_NAME?.trim() || 'com.mytrade.terminal';
   const sha =
-    typeof req.query.sha256 === 'string' && /^[A-Fa-f0-9:]{95}$/.test(req.query.sha256)
-      ? req.query.sha256.toUpperCase()
-      : process.env.PLAYSTORE_SHA256_FINGERPRINT ||
-        '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00';
+    process.env.PLAYSTORE_SHA256_FINGERPRINT?.trim() ||
+    '00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00:00';
 
   res.type('application/json').json([
     {
@@ -259,8 +295,8 @@ app.get('/.well-known/assetlinks.json', (req: Request, res: Response) => {
 
 app.get('/MyTrade.apk', (_req: Request, res: Response) => {
   const candidates = [
-    path.resolve(__dirname, 'public', 'MyTrade.apk'),
-    path.resolve(__dirname, 'dist', 'MyTrade.apk'),
+    path.resolve(process.cwd(), 'public', 'MyTrade.apk'),
+    path.resolve(process.cwd(), 'dist', 'MyTrade.apk'),
   ];
   const apkPath = candidates.find((p) => fs.existsSync(p));
   if (!apkPath) {
@@ -273,7 +309,8 @@ app.get('/MyTrade.apk', (_req: Request, res: Response) => {
   res.sendFile(apkPath);
 });
 
-const liveNewsCache = new Map<string, { expiresAt: number; payload: LiveMarketNewsResponse }>();
+// Bounded TTL cache (max 100 entries) preventing unbounded memory growth from arbitrary query strings
+const liveNewsCache = new BoundedTtlCache<LiveMarketNewsResponse>(100);
 
 app.get('/api/news/live', async (req: Request, res: Response) => {
   try {
@@ -285,17 +322,14 @@ app.get('/api/news/live', async (req: Request, res: Response) => {
     const forceRefresh = req.query.refresh === '1' || req.query.refresh === 'true';
 
     const cacheKey = `${category}:${query.toLowerCase()}`;
-    const existing = liveNewsCache.get(cacheKey);
-    if (!forceRefresh && existing && existing.expiresAt > Date.now()) {
-      res.json({ ...existing.payload, cached: true });
+    const existing = !forceRefresh ? liveNewsCache.get(cacheKey) : undefined;
+    if (existing) {
+      res.json({ ...existing, cached: true });
       return;
     }
 
     const news = await fetchFreeLiveMarketNews({ category, query });
-    liveNewsCache.set(cacheKey, {
-      expiresAt: Date.now() + 90_000, // 90-second cache for free feeds
-      payload: news,
-    });
+    liveNewsCache.set(cacheKey, news, 90_000);
     res.json({ ...news, cached: false });
   } catch (err: any) {
     res.status(500).json({
@@ -316,17 +350,23 @@ app.get('/api/calendar/economic', async (req: Request, res: Response) => {
   }
 });
 
-let cachedBotUsername: string | null = null;
+// Cache Telegram bot usernames keyed by SHA-256 hash of token (never a single global string)
+const telegramBotUsernameCache = new BoundedTtlCache<string>(16);
 
 async function getTelegramBotUsername(token?: string): Promise<string | null> {
   if (!token) return null;
-  if (cachedBotUsername) return cachedBotUsername;
+  const tokenKey = crypto.createHash('sha256').update(token).digest('hex');
+  const cached = telegramBotUsernameCache.get(tokenKey);
+  if (cached) return cached;
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`, {
+      signal: AbortSignal.timeout(6000),
+    });
     const data = (await res.json()) as any;
     if (res.ok && data?.ok && data?.result?.username) {
-      cachedBotUsername = `@${data.result.username}`;
-      return cachedBotUsername;
+      const username = `@${data.result.username}`;
+      telegramBotUsernameCache.set(tokenKey, username, 60 * 60_000);
+      return username;
     }
   } catch {
     // Ignore transient network errors
@@ -338,7 +378,9 @@ async function discoverTelegramChats(
   token: string
 ): Promise<{ id: string; title: string; type: string }[]> {
   try {
-    const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?limit=25`);
+    const res = await fetch(`https://api.telegram.org/bot${token}/getUpdates?limit=25`, {
+      signal: AbortSignal.timeout(6000),
+    });
     const data = (await res.json()) as any;
     if (!res.ok || !data?.ok || !Array.isArray(data.result)) return [];
     const seen = new Map<string, { id: string; title: string; type: string }>();
@@ -369,49 +411,6 @@ function isValidTelegramTarget(val?: unknown): val is string {
   return /^-?\d{5,20}$/.test(trimmed) || /^@[a-zA-Z0-9_]{3,64}$/.test(trimmed);
 }
 
-function isBlockedHostname(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (
-    host === 'localhost' ||
-    host === '::1' ||
-    host.endsWith('.local') ||
-    host.endsWith('.internal') ||
-    host.startsWith('fc') ||
-    host.startsWith('fd') ||
-    host.startsWith('fe80:')
-  ) {
-    return true;
-  }
-  const ipv4Match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (ipv4Match) {
-    const [a, b] = [Number(ipv4Match[1]), Number(ipv4Match[2])];
-    if (
-      a === 0 ||
-      a === 10 ||
-      a === 127 ||
-      (a === 169 && b === 254) ||
-      (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168)
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function validateExnessBridgeUrl(rawUrl?: string): URL | null {
-  if (!rawUrl || typeof rawUrl !== 'string') return null;
-  try {
-    const parsed = new URL(rawUrl.trim());
-    if (parsed.protocol !== 'https:') return null;
-    if (parsed.username || parsed.password) return null;
-    if (isBlockedHostname(parsed.hostname)) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 function getBrokerReadinessMap(userId?: string): Record<string, boolean> {
   const validExnessUrl = Boolean(validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL));
   const combined = getAllBrokerReadiness(userId);
@@ -432,23 +431,39 @@ function hasAnyLiveBrokerConfigured(userId?: string): boolean {
 
 app.get('/api/brokers/status', async (req: Request, res: Response) => {
   const verifiedUser = await verifyFirebaseRequestUser(req);
+  const uid = verifiedUser?.emailVerified ? verifiedUser.uid : undefined;
   res.json({
-    brokers: getBrokerReadinessMap(verifiedUser?.uid),
-    anyLiveBrokerConfigured: hasAnyLiveBrokerConfigured(verifiedUser?.uid),
+    brokers: getBrokerReadinessMap(uid),
+    anyLiveBrokerConfigured: hasAnyLiveBrokerConfigured(uid),
   });
 });
 
 registerBrokerOAuthRoutes(app, verifyFirebaseRequestUser);
 
-app.get('/api/brokers/exness/status', (_req: Request, res: Response) => {
+// Protect Exness bridge host, serverName, and accountMasked behind operator auth
+app.get('/api/brokers/exness/status', async (req: Request, res: Response) => {
   const parsedUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
   const hasToken = Boolean(process.env.EXNESS_API_TOKEN);
+  const configured = Boolean(parsedUrl && hasToken);
+
+  const verifiedUser = await verifyFirebaseRequestUser(req);
+  if (!isAuthorizedOperator(verifiedUser)) {
+    res.json({
+      configured,
+      bridgeUrlValid: Boolean(parsedUrl),
+      bridgeHost: null,
+      serverName: null,
+      accountMasked: null,
+    });
+    return;
+  }
+
   const rawAcc = process.env.EXNESS_ACCOUNT_ID?.trim() || '';
   const accountMasked =
     rawAcc.length >= 4 ? `${'*'.repeat(Math.max(2, rawAcc.length - 4))}${rawAcc.slice(-4)}` : null;
 
   res.json({
-    configured: Boolean(parsedUrl && hasToken),
+    configured,
     bridgeUrlValid: Boolean(parsedUrl),
     bridgeHost: parsedUrl ? parsedUrl.hostname : null,
     serverName: process.env.EXNESS_SERVER?.trim() || null,
@@ -457,23 +472,21 @@ app.get('/api/brokers/exness/status', (_req: Request, res: Response) => {
 });
 
 app.post('/api/brokers/exness/test', async (req: Request, res: Response) => {
-  const verifiedUser = await verifyFirebaseRequestUser(req);
-  if (!verifiedUser || !verifiedUser.emailVerified) {
-    res.status(401).json({
-      connected: false,
-      message: 'Sign in with your verified Google account to test the live Exness MT5 Bridge.',
-    });
-    return;
-  }
+  const operator = await requireOperator(
+    req,
+    res,
+    'Only authorized workspace operators can test the live Exness MT5 Bridge.'
+  );
+  if (!operator) return;
 
-  const parsedUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+  const parsedUrl = await resolveAndValidateBridgeUrl(process.env.EXNESS_BRIDGE_URL);
   const token = process.env.EXNESS_API_TOKEN?.trim();
 
   if (!parsedUrl || !token) {
     res.status(400).json({
       connected: false,
       message:
-        'Exness MT5 Bridge is not configured yet. Add HTTPS EXNESS_BRIDGE_URL and EXNESS_API_TOKEN in server environment secrets.',
+        'Exness MT5 Bridge is not configured or resolves to a restricted network. Add a public HTTPS EXNESS_BRIDGE_URL and EXNESS_API_TOKEN in server environment secrets.',
     });
     return;
   }
@@ -482,6 +495,7 @@ app.post('/api/brokers/exness/test', async (req: Request, res: Response) => {
     const base = parsedUrl.toString().replace(/\/+$/, '');
     const healthRes = await fetch(`${base}/health`, {
       method: 'GET',
+      redirect: 'error',
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
@@ -523,8 +537,7 @@ app.post('/api/brokers/exness/test', async (req: Request, res: Response) => {
 app.get('/api/integrations/status', async (_req: Request, res: Response) => {
   const tgToken = process.env.TELEGRAM_BOT_TOKEN;
   const botUsername = await getTelegramBotUsername(tgToken);
-  const discovered = tgToken && !process.env.TELEGRAM_CHAT_ID ? await discoverTelegramChats(tgToken) : [];
-  const hasChat = Boolean(process.env.TELEGRAM_CHAT_ID || discovered.length > 0);
+  const hasChat = Boolean(process.env.TELEGRAM_CHAT_ID);
   res.json({
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     telegramConfigured: Boolean(tgToken),
@@ -598,8 +611,17 @@ app.get('/api/market/watchlist', async (req: Request, res: Response) => {
   }
 });
 
+// Authenticated + rate-limited AI live analysis route
 app.post('/api/ai/analyze-live', async (req: Request, res: Response) => {
   try {
+    const user = await requireVerifiedUser(
+      req,
+      res,
+      'Sign in with a verified account to run AI live market analysis.'
+    );
+    if (!user) return;
+    if (!enforceRateLimit(req, res, `ai:analyze-live:${user.uid}`, 20, 60_000)) return;
+
     const instrumentId = String(req.body?.instrumentId || 'NIFTY50');
     const config = sanitizeConfig(req.body?.strategyConfig);
     const includeAiNarrative = req.body?.includeAiNarrative !== false;
@@ -645,9 +667,8 @@ app.post('/api/ai/analyze-live', async (req: Request, res: Response) => {
           config,
         });
       } catch (aiErr) {
-        baseSignal.aiNarrative = `Quantitative multi-timeframe rule engine completed. (AI commentary unavailable: ${
-          aiErr instanceof Error ? aiErr.message : 'Upstream AI error'
-        })`;
+        const normalized = normalizeGeminiError(aiErr);
+        baseSignal.aiNarrative = `Quantitative multi-timeframe rule engine completed. (${normalized.message})`;
       }
     }
 
@@ -658,14 +679,22 @@ app.post('/api/ai/analyze-live', async (req: Request, res: Response) => {
       signal: baseSignal,
     });
   } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : 'Live analysis failed',
-    });
+    const normalized = normalizeGeminiError(err);
+    res.status(normalized.status).json({ error: normalized.message });
   }
 });
 
+// Authenticated + rate-limited AI auto-scanner route
 app.post('/api/ai/auto-scan', async (req: Request, res: Response) => {
   try {
+    const user = await requireVerifiedUser(
+      req,
+      res,
+      'Sign in with a verified account to run the automated market scanner.'
+    );
+    if (!user) return;
+    if (!enforceRateLimit(req, res, `ai:auto-scan:${user.uid}`, 12, 60_000)) return;
+
     const requestedIds: string[] =
       Array.isArray(req.body?.instrumentIds) && req.body.instrumentIds.length > 0
         ? req.body.instrumentIds.map((x: unknown) => String(x)).slice(0, 10)
@@ -757,6 +786,14 @@ app.post('/api/ai/auto-scan', async (req: Request, res: Response) => {
 
 app.post('/api/pine/backtest', async (req: Request, res: Response) => {
   try {
+    const user = await requireVerifiedUser(
+      req,
+      res,
+      'Sign in with a verified account to run Pine Script backtests.'
+    );
+    if (!user) return;
+    if (!enforceRateLimit(req, res, `pine:backtest:${user.uid}`, 25, 60_000)) return;
+
     const {
       strategyName,
       instrumentId,
@@ -784,13 +821,20 @@ app.post('/api/pine/backtest', async (req: Request, res: Response) => {
       instrumentId: String(instrumentId || 'XAUUSD'),
       timeframe: tf,
       pineCode: pineCode.slice(0, 30_000),
-      quantity: Number(quantity) || 1,
-      initialCapital: Number(initialCapital) || 100_000,
-      stopLossPct: Number(stopLossPct) || 0.55,
-      takeProfitPct: Number(takeProfitPct) || 1.65,
+      quantity: Number.isFinite(Number(quantity)) && Number(quantity) > 0 ? Number(quantity) : 1,
+      initialCapital:
+        Number.isFinite(Number(initialCapital)) && Number(initialCapital) >= 100
+          ? Number(initialCapital)
+          : 100_000,
+      stopLossPct:
+        Number.isFinite(Number(stopLossPct)) && Number(stopLossPct) > 0 ? Number(stopLossPct) : 0.55,
+      takeProfitPct:
+        Number.isFinite(Number(takeProfitPct)) && Number(takeProfitPct) > 0
+          ? Number(takeProfitPct)
+          : 1.65,
       riskPerTradePct:
         riskPerTradePct !== undefined && Number.isFinite(Number(riskPerTradePct))
-          ? Number(riskPerTradePct)
+          ? Math.max(0, Math.min(10, Number(riskPerTradePct)))
           : 2.5,
       trailingStop: trailingStop !== false,
     });
@@ -806,6 +850,14 @@ app.post('/api/pine/backtest', async (req: Request, res: Response) => {
 
 app.post('/api/pine/evaluate-live', async (req: Request, res: Response) => {
   try {
+    const user = await requireVerifiedUser(
+      req,
+      res,
+      'Sign in with a verified account to evaluate live Pine strategies.'
+    );
+    if (!user) return;
+    if (!enforceRateLimit(req, res, `pine:eval:${user.uid}`, 30, 60_000)) return;
+
     const {
       strategyId,
       strategyName,
@@ -826,13 +878,17 @@ app.post('/api/pine/evaluate-live', async (req: Request, res: Response) => {
       : '5m';
 
     const result = await evaluatePineStrategyLive({
-      strategyId: String(strategyId || 'custom'),
+      strategyId: String(strategyId || 'custom').slice(0, 128),
       strategyName: typeof strategyName === 'string' ? strategyName.slice(0, 100) : 'Pine Bot',
       instrumentId: String(instrumentId || 'XAUUSD'),
       timeframe: tf,
       pineCode: pineCode.slice(0, 30_000),
-      stopLossPct: Number(stopLossPct) || 0.6,
-      takeProfitPct: Number(takeProfitPct) || 1.2,
+      stopLossPct:
+        Number.isFinite(Number(stopLossPct)) && Number(stopLossPct) > 0 ? Number(stopLossPct) : 0.6,
+      takeProfitPct:
+        Number.isFinite(Number(takeProfitPct)) && Number(takeProfitPct) > 0
+          ? Number(takeProfitPct)
+          : 1.2,
     });
 
     res.json(result);
@@ -844,8 +900,19 @@ app.post('/api/pine/evaluate-live', async (req: Request, res: Response) => {
   }
 });
 
+const MAX_IMAGE_BASE64_CHARS = 7_000_000; // ~5 MB binary image
+
+// Authenticated + rate-limited + payload-capped AI chart screenshot analyzer
 app.post('/api/ai/analyze-chart', async (req: Request, res: Response) => {
   try {
+    const user = await requireVerifiedUser(
+      req,
+      res,
+      'Sign in with a verified account to inspect chart screenshots with AI.'
+    );
+    if (!user) return;
+    if (!enforceRateLimit(req, res, `ai:analyze-chart:${user.uid}`, 10, 60_000)) return;
+
     const { imageBase64, mimeType, instrumentId, timeframe, currentPrice, optionType, expiry, strategyConfig } =
       req.body ?? {};
 
@@ -853,6 +920,15 @@ app.post('/api/ai/analyze-chart', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'Chart screenshot image is required.' });
       return;
     }
+    if (imageBase64.length > MAX_IMAGE_BASE64_CHARS) {
+      res.status(413).json({ error: 'Chart screenshot exceeds 5 MB upload limit.' });
+      return;
+    }
+    const safeMime =
+      typeof mimeType === 'string' && /^image\/(png|jpeg|jpg|webp)$/i.test(mimeType)
+        ? mimeType
+        : 'image/png';
+
     if (!process.env.GEMINI_API_KEY) {
       res.status(503).json({
         error: 'GEMINI_API_KEY is not configured in server environment secrets.',
@@ -862,31 +938,47 @@ app.post('/api/ai/analyze-chart', async (req: Request, res: Response) => {
 
     const instrument = getInstrumentById(String(instrumentId || 'NIFTY50'));
     const config = sanitizeConfig(strategyConfig);
+    const parsedCurrentPrice =
+      currentPrice !== undefined && Number.isFinite(Number(currentPrice)) && Number(currentPrice) > 0
+        ? Number(currentPrice)
+        : undefined;
 
     const signal = await analyzeUploadedChartWithGemini({
       imageBase64,
-      mimeType: typeof mimeType === 'string' ? mimeType : 'image/png',
+      mimeType: safeMime,
       instrument,
-      timeframe: typeof timeframe === 'string' ? timeframe : '5m',
-      currentPrice: currentPrice ? Number(currentPrice) : undefined,
+      timeframe: typeof timeframe === 'string' ? timeframe.slice(0, 12) : '5m',
+      currentPrice: parsedCurrentPrice,
       optionType: ['SPOT_FUT', 'CE', 'PE'].includes(optionType) ? optionType : 'SPOT_FUT',
-      expiry: typeof expiry === 'string' ? expiry : undefined,
+      expiry: typeof expiry === 'string' ? expiry.slice(0, 40) : undefined,
       config,
     });
 
     res.json({ signal });
   } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : 'Chart analysis failed',
-    });
+    const normalized = normalizeGeminiError(err);
+    res.status(normalized.status).json({ error: normalized.message });
   }
 });
 
+// Authenticated + rate-limited AI trading assistant chat route
 app.post('/api/ai/chat', async (req: Request, res: Response) => {
   try {
+    const user = await requireVerifiedUser(
+      req,
+      res,
+      'Sign in with a verified account to use the AI Trading Assistant.'
+    );
+    if (!user) return;
+    if (!enforceRateLimit(req, res, `ai:chat:${user.uid}`, 20, 60_000)) return;
+
     const { message, history, instrumentId, imageBase64, mimeType, strategyConfig } = req.body ?? {};
-    if (!message || typeof message !== 'string') {
+    if (!message || typeof message !== 'string' || !message.trim()) {
       res.status(400).json({ error: 'Message text is required.' });
+      return;
+    }
+    if (typeof imageBase64 === 'string' && imageBase64.length > MAX_IMAGE_BASE64_CHARS) {
+      res.status(413).json({ error: 'Attached chart image exceeds 5 MB upload limit.' });
       return;
     }
     if (!process.env.GEMINI_API_KEY) {
@@ -910,14 +1002,19 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
       fetchLiveMarketQuote(instrument.id, config.entryTimeframe, emaPeriods).catch(() => null),
     ]);
 
+    const safeMime =
+      typeof mimeType === 'string' && /^image\/(png|jpeg|jpg|webp)$/i.test(mimeType)
+        ? mimeType
+        : 'image/png';
+
     const reply = await chatWithTradingAssistant({
-      message,
-      history: Array.isArray(history) ? history : [],
+      message: message.slice(0, 4000),
+      history: Array.isArray(history) ? history.slice(-10) : [],
       instrument,
       trendQuote,
       entryQuote,
       imageBase64: typeof imageBase64 === 'string' ? imageBase64 : undefined,
-      mimeType: typeof mimeType === 'string' ? mimeType : undefined,
+      mimeType: imageBase64 ? safeMime : undefined,
       config,
     });
 
@@ -927,18 +1024,20 @@ app.post('/api/ai/chat', async (req: Request, res: Response) => {
       marketTimestamp: entryQuote?.marketTimestamp ?? null,
     });
   } catch (err) {
-    res.status(500).json({
-      error: err instanceof Error ? err.message : 'AI chatbot request failed',
-    });
+    const normalized = normalizeGeminiError(err);
+    res.status(normalized.status).json({ error: normalized.message });
   }
 });
 
+// Operator-authorized Telegram chat discovery (prevents arbitrary verified users reading bot updates)
 app.get('/api/telegram/chats', async (req: Request, res: Response) => {
-  const verifiedUser = await verifyFirebaseRequestUser(req);
-  if (!verifiedUser || !verifiedUser.emailVerified) {
-    res.status(401).json({ error: 'Sign in with Google to detect Telegram bot chats.' });
-    return;
-  }
+  const operator = await requireOperator(
+    req,
+    res,
+    'Only authorized workspace operators can inspect server Telegram bot chats.'
+  );
+  if (!operator) return;
+
   const token = process.env.TELEGRAM_BOT_TOKEN;
   if (!token) {
     res.json({ botConfigured: false, botUsername: null, chats: [] });
@@ -956,19 +1055,19 @@ app.get('/api/telegram/chats', async (req: Request, res: Response) => {
   });
 });
 
+// Operator-authorized + rate-limited Telegram broadcast endpoint
 app.post('/api/telegram/send', async (req: Request, res: Response) => {
   try {
-    const verifiedUser = await verifyFirebaseRequestUser(req);
-    if (!verifiedUser || !verifiedUser.emailVerified) {
-      res.status(401).json({
-        deliveryStatus: 'FAILED',
-        statusDetail: 'Sign in with Google before broadcasting alerts via the server Telegram bot.',
-      });
-      return;
-    }
+    const operator = await requireOperator(
+      req,
+      res,
+      'Only authorized workspace operators can send alerts through the server Telegram bot.'
+    );
+    if (!operator) return;
+    if (!enforceRateLimit(req, res, `tg:send:${operator.uid}`, 15, 60_000)) return;
 
     const { messageText, chatId: requestedChatId } = req.body ?? {};
-    if (!messageText || typeof messageText !== 'string') {
+    if (!messageText || typeof messageText !== 'string' || !messageText.trim()) {
       res.status(400).json({ error: 'messageText is required.' });
       return;
     }
@@ -1008,9 +1107,10 @@ app.post('/api/telegram/send', async (req: Request, res: Response) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: targetChatId,
-        text: messageText,
+        text: messageText.slice(0, 4096),
         disable_web_page_preview: true,
       }),
+      signal: AbortSignal.timeout(8000),
     });
 
     const tgJson = (await tgRes.json()) as any;
@@ -1034,10 +1134,18 @@ app.post('/api/telegram/send', async (req: Request, res: Response) => {
   }
 });
 
+// Authenticated order execution with server-side kill-switch, operator LIVE check, and strict finite numeric validation
 app.post('/api/orders/execute', async (req: Request, res: Response) => {
   try {
+    const verifiedUser = await requireVerifiedUser(
+      req,
+      res,
+      'Verified Google Sign-In is required before executing orders.'
+    );
+    if (!verifiedUser) return;
+    if (!enforceRateLimit(req, res, `orders:exec:${verifiedUser.uid}`, 20, 60_000)) return;
+
     const {
-      userId,
       signalId,
       instrument,
       contract,
@@ -1056,7 +1164,9 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       killSwitchActive,
     } = req.body ?? {};
 
-    if (killSwitchActive) {
+    // Enforce server-side kill switch state (cannot be bypassed by sending killSwitchActive: false)
+    const serverKillActive = serverKillSwitchByUser.get(verifiedUser.uid) === true;
+    if (serverKillActive || killSwitchActive === true) {
       res.status(403).json({
         status: 'KILLED',
         error: 'Emergency Kill Switch is ACTIVE. All order execution is halted.',
@@ -1072,29 +1182,53 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       return;
     }
 
-    if (!instrument || !contract || !Number(quantity) || Number(quantity) <= 0 || !Number(entryPrice)) {
+    const qtyNum = Number(quantity);
+    const entryNum = Number(entryPrice);
+    const slNum = stopLoss !== undefined ? Number(stopLoss) : 0;
+    const tp1Num = targetPrice !== undefined ? Number(targetPrice) : 0;
+    const tp2Num = target2 !== undefined && target2 !== null ? Number(target2) : undefined;
+    const tp3Num = target3 !== undefined && target3 !== null ? Number(target3) : undefined;
+
+    if (
+      !instrument ||
+      typeof instrument !== 'string' ||
+      !contract ||
+      typeof contract !== 'string' ||
+      !['BUY', 'SELL'].includes(String(side)) ||
+      !Number.isFinite(qtyNum) ||
+      qtyNum <= 0 ||
+      qtyNum > 1_000_000 ||
+      !Number.isFinite(entryNum) ||
+      entryNum <= 0 ||
+      entryNum > 100_000_000 ||
+      !Number.isFinite(slNum) ||
+      slNum < 0 ||
+      !Number.isFinite(tp1Num) ||
+      tp1Num < 0 ||
+      (tp2Num !== undefined && (!Number.isFinite(tp2Num) || tp2Num < 0)) ||
+      (tp3Num !== undefined && (!Number.isFinite(tp3Num) || tp3Num < 0))
+    ) {
       res.status(400).json({
         status: 'REJECTED',
-        error: 'Invalid order parameters (instrument, contract, quantity > 0, and entryPrice required).',
+        error:
+          'Invalid order parameters: instrument, contract, BUY/SELL side, finite positive quantity and entryPrice, and non-negative SL/TP values are required.',
+      });
+      return;
+    }
+
+    const normalizedMode = executionMode === 'LIVE' ? 'LIVE' : 'PAPER';
+
+    if (normalizedMode === 'LIVE' && !isAuthorizedOperator(verifiedUser)) {
+      res.status(403).json({
+        status: 'REJECTED',
+        error:
+          'Only authorized account operators can submit LIVE broker orders. Switch to Paper/Demo mode or configure ADMIN_ALLOWED_EMAILS.',
       });
       return;
     }
 
     pruneRecentOrderCache();
-    const verifiedUser = await verifyFirebaseRequestUser(req);
-    const effectiveUserId = verifiedUser?.uid || (executionMode === 'LIVE' ? '' : String(userId || 'anon'));
-
-    if (executionMode === 'LIVE') {
-      if (!verifiedUser || !verifiedUser.emailVerified) {
-        res.status(401).json({
-          status: 'REJECTED',
-          error: 'Verified Google Sign-In is required before submitting Actual Live broker orders.',
-        });
-        return;
-      }
-    }
-
-    const dedupKey = `${effectiveUserId || 'anon'}:${signalId || contract}:${side}`;
+    const dedupKey = `${verifiedUser.uid}:${String(signalId || contract).slice(0, 80)}:${side}`;
     const lastOrderAt = recentOrderCache.get(dedupKey);
     if (lastOrderAt && Date.now() - lastOrderAt < 60_000) {
       res.status(409).json({
@@ -1104,8 +1238,8 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       return;
     }
 
-    if (executionMode === 'LIVE') {
-      if (!hasAnyLiveBrokerConfigured()) {
+    if (normalizedMode === 'LIVE') {
+      if (!hasAnyLiveBrokerConfigured(verifiedUser.uid)) {
         res.status(503).json({
           status: 'REJECTED',
           error:
@@ -1114,33 +1248,35 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
         return;
       }
 
-      const exnessUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+      const exnessUrl = await resolveAndValidateBridgeUrl(process.env.EXNESS_BRIDGE_URL);
       const exnessToken = process.env.EXNESS_API_TOKEN?.trim();
       const brokerLabelStr = String(brokerName || 'Authorized Broker Adapter').slice(0, 80);
       const wantsExness =
         Boolean(exnessUrl && exnessToken) &&
-        (brokerLabelStr.toLowerCase().includes('exness') ||
-          !process.env.BROKER_API_KEY);
+        (brokerLabelStr.toLowerCase().includes('exness') || !process.env.BROKER_API_KEY);
 
       if (wantsExness && exnessUrl && exnessToken) {
         const base = exnessUrl.toString().replace(/\/+$/, '');
         const bridgeRes = await fetch(`${base}/orders`, {
           method: 'POST',
+          redirect: 'error',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${exnessToken}`,
           },
           body: JSON.stringify({
-            symbol: String(instrument),
-            contract: String(contract),
+            symbol: instrument.slice(0, 40),
+            contract: contract.slice(0, 80),
             side: side === 'SELL' ? 'SELL' : 'BUY',
-            orderType: String(orderType || 'MARKET'),
-            volume: Number(quantity),
-            entryPrice: Number(entryPrice),
-            stopLoss: Number(stopLoss),
-            tp1: Number(targetPrice),
-            tp2: target2 ? Number(target2) : undefined,
-            tp3: target3 ? Number(target3) : undefined,
+            orderType: ['MARKET', 'LIMIT', 'SL-M'].includes(String(orderType))
+              ? String(orderType)
+              : 'MARKET',
+            volume: qtyNum,
+            entryPrice: entryNum,
+            stopLoss: slNum,
+            tp1: tp1Num,
+            tp2: tp2Num,
+            tp3: tp3Num,
             accountId: process.env.EXNESS_ACCOUNT_ID?.trim() || undefined,
             server: process.env.EXNESS_SERVER?.trim() || undefined,
           }),
@@ -1168,7 +1304,7 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
           status: 'SUBMITTED_LIVE',
           brokerOrderId: liveOrderId,
           brokerName: 'Exness MT5 Live Bridge',
-          message: `Live order ${liveOrderId} transmitted to Exness MT5 (${side} ${quantity} ${contract}, SL ${stopLoss}, TP1 ${targetPrice}${target2 ? ` / TP2 ${target2}` : ''}${target3 ? ` / TP3 ${target3}` : ''}).`,
+          message: `Live order ${liveOrderId} transmitted to Exness MT5 (${side} ${qtyNum} ${contract}, SL ${slNum}, TP1 ${tp1Num}${tp2Num ? ` / TP2 ${tp2Num}` : ''}${tp3Num ? ` / TP3 ${tp3Num}` : ''}).`,
         });
         return;
       }
@@ -1186,7 +1322,7 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
       status: 'CONFIRMED_PAPER',
       brokerOrderId: paperOrderId,
       brokerName: String(brokerName || 'My Trade Paper Trading Engine').slice(0, 80),
-      message: `Paper order ${paperOrderId} recorded for ${contract} (${side} ${quantity} qty, SL ${stopLoss}, TP1 ${targetPrice}${target2 ? ` · TP2 ${target2}` : ''}${target3 ? ` · TP3 ${target3}` : ''}${expiry ? `, Exp ${expiry}` : ''}).`,
+      message: `Paper order ${paperOrderId} recorded for ${contract} (${side} ${qtyNum} qty, SL ${slNum}, TP1 ${tp1Num}${tp2Num ? ` · TP2 ${tp2Num}` : ''}${tp3Num ? ` · TP3 ${tp3Num}` : ''}${expiry ? `, Exp ${expiry}` : ''}).`,
     });
   } catch (err) {
     res.status(500).json({
@@ -1198,19 +1334,21 @@ app.post('/api/orders/execute', async (req: Request, res: Response) => {
 
 app.post('/api/orders/trail-sl', async (req: Request, res: Response) => {
   try {
-    const verifiedUser = await verifyFirebaseRequestUser(req);
-    if (!verifiedUser || !verifiedUser.emailVerified) {
-      res.status(401).json({ ok: false, error: 'Verified Google Sign-In is required to modify live Stop-Loss orders.' });
-      return;
-    }
+    const operator = await requireOperator(
+      req,
+      res,
+      'Only authorized workspace operators can modify live Stop-Loss orders.'
+    );
+    if (!operator) return;
 
     const { brokerOrderId, instrument, newStopLoss, tpStage } = req.body ?? {};
-    if (!brokerOrderId || !Number.isFinite(Number(newStopLoss))) {
-      res.status(400).json({ ok: false, error: 'brokerOrderId and numeric newStopLoss are required.' });
+    const slNum = Number(newStopLoss);
+    if (!brokerOrderId || typeof brokerOrderId !== 'string' || !Number.isFinite(slNum) || slNum <= 0) {
+      res.status(400).json({ ok: false, error: 'brokerOrderId and positive finite newStopLoss are required.' });
       return;
     }
 
-    const exnessUrl = validateExnessBridgeUrl(process.env.EXNESS_BRIDGE_URL);
+    const exnessUrl = await resolveAndValidateBridgeUrl(process.env.EXNESS_BRIDGE_URL);
     const exnessToken = process.env.EXNESS_API_TOKEN?.trim();
     if (!exnessUrl || !exnessToken) {
       res.json({ ok: false, skipped: true, reason: 'No live Exness MT5 bridge configured.' });
@@ -1220,15 +1358,16 @@ app.post('/api/orders/trail-sl', async (req: Request, res: Response) => {
     const base = exnessUrl.toString().replace(/\/+$/, '');
     const modRes = await fetch(`${base}/orders/modify-sl`, {
       method: 'POST',
+      redirect: 'error',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${exnessToken}`,
       },
       body: JSON.stringify({
-        orderId: String(brokerOrderId),
-        symbol: String(instrument || ''),
-        stopLoss: Number(newStopLoss),
-        tpStage: Number(tpStage) || 1,
+        orderId: brokerOrderId.slice(0, 80),
+        symbol: String(instrument || '').slice(0, 40),
+        stopLoss: slNum,
+        tpStage: Number.isFinite(Number(tpStage)) ? Number(tpStage) : 1,
       }),
       signal: AbortSignal.timeout(8000),
     });
@@ -1242,38 +1381,27 @@ app.post('/api/orders/trail-sl', async (req: Request, res: Response) => {
   }
 });
 
-function sanitizeGuestSessionId(raw: unknown): string | null {
-  if (typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  return /^[a-zA-Z0-9_-]{8,64}$/.test(trimmed) ? `guest:${trimmed}` : null;
-}
-
+// Position monitor routes strictly require verified Firebase Auth (eliminating guest sessionId IDOR)
 app.post('/api/monitor/positions/sync', async (req: Request, res: Response) => {
   try {
+    const verifiedUser = await requireVerifiedUser(
+      req,
+      res,
+      'Verified Google Sign-In is required to sync positions to the 24/7 server monitor.'
+    );
+    if (!verifiedUser) return;
+
     const positions = Array.isArray(req.body?.positions) ? req.body.positions : [];
     const hasLivePosition = positions.some((p: any) => p?.executionMode === 'LIVE');
-    const verifiedUser = await verifyFirebaseRequestUser(req);
-
-    if (hasLivePosition && (!verifiedUser || !verifiedUser.emailVerified)) {
-      res.status(401).json({
+    if (hasLivePosition && !isAuthorizedOperator(verifiedUser)) {
+      res.status(403).json({
         ok: false,
-        error: 'Verified Google Sign-In is required to register LIVE positions on the 24/7 server monitor.',
+        error: 'Operator authorization is required to register LIVE positions on the server monitor.',
       });
       return;
     }
 
-    const ownerKey = verifiedUser?.uid
-      ? `uid:${verifiedUser.uid}`
-      : sanitizeGuestSessionId(req.body?.sessionId);
-
-    if (!ownerKey) {
-      res.status(400).json({
-        ok: false,
-        error: 'Sign in or provide a valid guest sessionId to sync positions.',
-      });
-      return;
-    }
-
+    const ownerKey = `uid:${verifiedUser.uid}`;
     const sanitized = positions
       .filter((p: any) => p && typeof p.tradeId === 'string' && typeof p.instrumentId === 'string')
       .slice(0, 30)
@@ -1284,18 +1412,23 @@ app.post('/api/monitor/positions/sync', async (req: Request, res: Response) => {
         contract: String(p.contract || p.instrumentId).slice(0, 80),
         direction: p.direction === 'SELL' ? ('SELL' as const) : ('BUY' as const),
         executionMode:
-          p.executionMode === 'LIVE' && verifiedUser?.emailVerified
+          p.executionMode === 'LIVE' && isAuthorizedOperator(verifiedUser)
             ? ('LIVE' as const)
             : ('PAPER' as const),
-        entryPrice: Number(p.entryPrice) || 0,
-        stopLoss: Number(p.stopLoss) || 0,
-        target1: Number(p.target1) || 0,
-        target2: Number(p.target2) || 0,
-        target3: Number(p.target3) || 0,
+        entryPrice: Number.isFinite(Number(p.entryPrice)) ? Math.max(0, Number(p.entryPrice)) : 0,
+        stopLoss: Number.isFinite(Number(p.stopLoss)) ? Math.max(0, Number(p.stopLoss)) : 0,
+        target1: Number.isFinite(Number(p.target1)) ? Math.max(0, Number(p.target1)) : 0,
+        target2: Number.isFinite(Number(p.target2)) ? Math.max(0, Number(p.target2)) : 0,
+        target3: Number.isFinite(Number(p.target3)) ? Math.max(0, Number(p.target3)) : 0,
         tpStage: ([0, 1, 2].includes(Number(p.tpStage)) ? Number(p.tpStage) : 0) as 0 | 1 | 2,
-        quantity: Math.max(0.0001, Number(p.quantity) || 1),
-        remainingQuantity: Math.max(0, Number(p.remainingQuantity ?? p.quantity) || 0),
-        partialRealizedPnl: Number(p.partialRealizedPnl) || 0,
+        quantity: Number.isFinite(Number(p.quantity)) && Number(p.quantity) > 0 ? Number(p.quantity) : 1,
+        remainingQuantity:
+          Number.isFinite(Number(p.remainingQuantity ?? p.quantity))
+            ? Math.max(0, Number(p.remainingQuantity ?? p.quantity))
+            : 0,
+        partialRealizedPnl: Number.isFinite(Number(p.partialRealizedPnl))
+          ? Number(p.partialRealizedPnl)
+          : 0,
         enablePartialProfitBooking: p.enablePartialProfitBooking !== false,
         brokerOrderId: typeof p.brokerOrderId === 'string' ? p.brokerOrderId.slice(0, 80) : undefined,
       }));
@@ -1316,16 +1449,14 @@ app.post('/api/monitor/positions/sync', async (req: Request, res: Response) => {
 
 app.get('/api/monitor/positions', async (req: Request, res: Response) => {
   try {
-    const verifiedUser = await verifyFirebaseRequestUser(req);
-    const ownerKey = verifiedUser?.uid
-      ? `uid:${verifiedUser.uid}`
-      : sanitizeGuestSessionId(req.query.sessionId);
+    const verifiedUser = await requireVerifiedUser(
+      req,
+      res,
+      'Verified Google Sign-In is required to read monitored positions.'
+    );
+    if (!verifiedUser) return;
 
-    if (!ownerKey) {
-      res.json({ ok: true, activeCount: 0, positions: [], pendingEvents: [], worker: getGlobalMonitorStats() });
-      return;
-    }
-
+    const ownerKey = `uid:${verifiedUser.uid}`;
     const status = getMonitoredStatusForOwner(ownerKey);
     res.json({
       ok: true,
@@ -1341,16 +1472,14 @@ app.get('/api/monitor/positions', async (req: Request, res: Response) => {
 });
 
 app.delete('/api/monitor/positions/:tradeId', async (req: Request, res: Response) => {
-  const verifiedUser = await verifyFirebaseRequestUser(req);
-  const ownerKey = verifiedUser?.uid
-    ? `uid:${verifiedUser.uid}`
-    : sanitizeGuestSessionId(req.query.sessionId);
+  const verifiedUser = await requireVerifiedUser(
+    req,
+    res,
+    'Verified Google Sign-In is required to remove monitored positions.'
+  );
+  if (!verifiedUser) return;
 
-  if (!ownerKey) {
-    res.status(401).json({ ok: false, error: 'Unauthorized monitor removal request.' });
-    return;
-  }
-
+  const ownerKey = `uid:${verifiedUser.uid}`;
   const removed = removeMonitoredPosition(ownerKey, String(req.params.tradeId || '').slice(0, 128));
   res.json({ ok: true, removed });
 });
@@ -1394,7 +1523,7 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    const distDir = path.resolve(__dirname, 'dist');
+    const distDir = path.resolve(process.cwd(), 'dist');
     app.use(express.static(distDir));
     app.get('*', (_req: Request, res: Response) => {
       const indexHtml = path.join(distDir, 'index.html');

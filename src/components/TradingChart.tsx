@@ -56,6 +56,7 @@ import type {
   TradeTrailState,
 } from '../types/trading';
 import { useTheme } from '../lib/theme';
+import { evaluateMrxReversalStrategy } from '../lib/mrxStrategy';
 
 interface TradingChartProps {
   instrument: InstrumentMeta;
@@ -73,6 +74,9 @@ interface TradingChartProps {
   onLivePriceTick?: (instrumentId: string, price: number) => void;
   onQuickOrder?: (side: 'BUY' | 'SELL', quantity: number) => Promise<void> | void;
   onQuickPriceAlert?: (price: number) => void;
+  mrXEnabled?: boolean;
+  onToggleMrX?: () => void;
+  focusMyTradeChartSignal?: number;
   headerAccessory?: React.ReactNode;
   secondaryStrip?: React.ReactNode;
   compact?: boolean;
@@ -321,6 +325,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   onLivePriceTick,
   onQuickOrder,
   onQuickPriceAlert,
+  mrXEnabled,
+  onToggleMrX,
+  focusMyTradeChartSignal,
   headerAccessory,
   secondaryStrip,
   compact = false,
@@ -333,6 +340,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   const emaFastRef = useRef<ISeriesApi<'Line'> | null>(null);
   const emaMidRef = useRef<ISeriesApi<'Line'> | null>(null);
   const emaSlowRef = useRef<ISeriesApi<'Line'> | null>(null);
+  const mrxEma9Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const mrxEma15Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const mrxEma200Ref = useRef<ISeriesApi<'Line'> | null>(null);
   const vwapSeriesRef = useRef<ISeriesApi<'Line'> | null>(null);
   const markersPluginRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
@@ -358,14 +368,35 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   onLivePriceTickRef.current = onLivePriceTick;
   const liveHeaderPriceRef = useRef<HTMLSpanElement | null>(null);
 
-  const [chartMode, setChartMode] = useState<ChartMode>('TRADING_VIEW');
+  const [chartMode, setChartMode] = useState<ChartMode>(() =>
+    mrXEnabled ? 'MY_TRADE_LIVE' : 'TRADING_VIEW'
+  );
   const [chartStyle, setChartStyle] = useState<ChartStyle>('CANDLES');
   const [wsStatus, setWsStatus] = useState<WsConnStatus>('IDLE');
   const [showEmas, setShowEmas] = useState(true);
   const [showVwap, setShowVwap] = useState(true);
   const [showVolume, setShowVolume] = useState(true);
   const [showLevels, setShowLevels] = useState(true);
+  const [internalMrXEnabled, setInternalMrXEnabled] = useState(false);
+  const showMrX = mrXEnabled ?? internalMrXEnabled;
+  const handleToggleMrX = useCallback(() => {
+    const next = !showMrX;
+    if (next && chartMode !== 'MY_TRADE_LIVE') {
+      setChartMode('MY_TRADE_LIVE');
+    }
+    if (onToggleMrX) {
+      onToggleMrX();
+    } else {
+      setInternalMrXEnabled(next);
+    }
+  }, [showMrX, chartMode, onToggleMrX]);
   const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    if (focusMyTradeChartSignal && focusMyTradeChartSignal > 0) {
+      setChartMode('MY_TRADE_LIVE');
+    }
+  }, [focusMyTradeChartSignal]);
 
   // Full TradingView Advanced Chart panel toggles
   const [tvShowWatchlist, setTvShowWatchlist] = useState(false);
@@ -653,7 +684,32 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       volumeSeriesRef.current = null;
     }
 
-    if (showEmas) {
+    if (showMrX) {
+      mrxEma9Ref.current = chart.addSeries(LineSeries, {
+        color: '#22C55E',
+        lineWidth: 2,
+        priceLineVisible: false,
+        title: 'MR_X EMA 9',
+      });
+      mrxEma15Ref.current = chart.addSeries(LineSeries, {
+        color: '#F97316',
+        lineWidth: 2,
+        priceLineVisible: false,
+        title: 'MR_X EMA 15',
+      });
+      mrxEma200Ref.current = chart.addSeries(LineSeries, {
+        color: '#EF4444',
+        lineWidth: 2,
+        priceLineVisible: false,
+        title: 'MR_X EMA 200',
+      });
+      emaFastRef.current = null;
+      emaMidRef.current = null;
+      emaSlowRef.current = null;
+    } else if (showEmas) {
+      mrxEma9Ref.current = null;
+      mrxEma15Ref.current = null;
+      mrxEma200Ref.current = null;
       emaFastRef.current = chart.addSeries(LineSeries, {
         color: '#F59E0B',
         lineWidth: 2,
@@ -673,6 +729,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         title: `EMA ${config.emaSlow}`,
       });
     } else {
+      mrxEma9Ref.current = null;
+      mrxEma15Ref.current = null;
+      mrxEma200Ref.current = null;
       emaFastRef.current = null;
       emaMidRef.current = null;
       emaSlowRef.current = null;
@@ -754,6 +813,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       emaFastRef.current = null;
       emaMidRef.current = null;
       emaSlowRef.current = null;
+      mrxEma9Ref.current = null;
+      mrxEma15Ref.current = null;
+      mrxEma200Ref.current = null;
       vwapSeriesRef.current = null;
       chartRef.current = null;
       lastStructureKeyRef.current = '';
@@ -770,6 +832,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     instrument.id,
     timeframe,
     showEmas,
+    showMrX,
     showVwap,
     showVolume,
     config.emaFast,
@@ -846,7 +909,8 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       liveHeaderPriceRef.current.textContent = `${instrument.currency}${quote.price.toLocaleString()}`;
     }
 
-    const structureKey = `${chartMode}:${chartStyle}:${instrument.id}:${timeframe}:${showEmas}:${showVwap}:${showVolume}:${config.emaFast}:${config.emaMid}:${config.emaSlow}:${effectiveCandles.length}:${effectiveCandles[0].time}:${effectiveLastBar.time}`;
+    const mrxEval = showMrX ? evaluateMrxReversalStrategy(effectiveCandles) : null;
+    const structureKey = `${chartMode}:${chartStyle}:${instrument.id}:${timeframe}:${showEmas}:${showMrX}:${showVwap}:${showVolume}:${config.emaFast}:${config.emaMid}:${config.emaSlow}:${effectiveCandles.length}:${effectiveCandles[0].time}:${effectiveLastBar.time}`;
     const restBarHash = `${rawLastBar.time}:${rawLastBar.open}:${rawLastBar.high}:${rawLastBar.low}:${rawLastBar.close}`;
 
     if (lastStructureKeyRef.current === structureKey) {
@@ -886,7 +950,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
         if (effectiveLastBar.time >= lastIndicatorTimeRef.current) {
           try {
-            if (showEmas) {
+            if (showMrX && mrxEval) {
+              const p9 = mrxEval.ema9Series[mrxEval.ema9Series.length - 1];
+              const p15 = mrxEval.ema15Series[mrxEval.ema15Series.length - 1];
+              const p200 = mrxEval.ema200Series[mrxEval.ema200Series.length - 1];
+              if (p9) mrxEma9Ref.current?.update({ time: p9.time as UTCTimestamp, value: p9.value });
+              if (p15) mrxEma15Ref.current?.update({ time: p15.time as UTCTimestamp, value: p15.value });
+              if (p200) mrxEma200Ref.current?.update({ time: p200.time as UTCTimestamp, value: p200.value });
+            } else if (showEmas) {
               const fastPts = calcEmaPoints(effectiveCandles, config.emaFast);
               const midPts = calcEmaPoints(effectiveCandles, config.emaMid);
               const slowPts = calcEmaPoints(effectiveCandles, config.emaSlow);
@@ -937,7 +1008,17 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         );
       }
 
-      if (showEmas) {
+      if (showMrX && mrxEval) {
+        mrxEma9Ref.current?.setData(
+          mrxEval.ema9Series.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+        );
+        mrxEma15Ref.current?.setData(
+          mrxEval.ema15Series.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+        );
+        mrxEma200Ref.current?.setData(
+          mrxEval.ema200Series.map((p) => ({ time: p.time as UTCTimestamp, value: p.value }))
+        );
+      } else if (showEmas) {
         emaFastRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaFast));
         emaMidRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaMid));
         emaSlowRef.current?.setData(calcEmaPoints(effectiveCandles, config.emaSlow));
@@ -972,7 +1053,11 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       })
       .join('|');
 
-    const levelsKey = `${chartStyle}:${showLevels}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${openTradesKey}:${effectiveLastBar.time}`;
+    const mrxSignalsKey = mrxEval
+      ? `${mrxEval.signals.length}:${mrxEval.lastSignal?.time ?? ''}:${mrxEval.lastSignal?.direction ?? ''}`
+      : 'off';
+
+    const levelsKey = `${chartStyle}:${showLevels}:${showMrX}:${mrxSignalsKey}:${quote.levels?.immediateResistance ?? ''}:${quote.levels?.immediateSupport ?? ''}:${activeSignal?.instrument ?? ''}:${activeSignal?.direction ?? ''}:${activeSignal?.entryPrice ?? ''}:${activeSignal?.stopLoss ?? ''}:${activeSignal?.target1 ?? ''}:${activeSignal?.target2 ?? ''}:${openTradesKey}:${effectiveLastBar.time}`;
 
     if (lastLevelsKeyRef.current !== levelsKey) {
       for (const line of priceLinesRef.current) {
@@ -1143,6 +1228,19 @@ export const TradingChart: React.FC<TradingChartProps> = ({
         }
       }
 
+      if (showMrX && mrxEval && mrxEval.signals.length > 0) {
+        for (const sig of mrxEval.signals) {
+          markers.push({
+            time: sig.time as UTCTimestamp,
+            position: sig.direction === 'BUY' ? 'belowBar' : 'aboveBar',
+            color: sig.direction === 'BUY' ? '#22C55E' : '#EF4444',
+            shape: sig.direction === 'BUY' ? 'arrowUp' : 'arrowDown',
+            text: sig.direction,
+          });
+        }
+      }
+
+      markers.sort((a, b) => Number(a.time) - Number(b.time));
       markersPluginRef.current?.setMarkers(markers);
       lastLevelsKeyRef.current = levelsKey;
     }
@@ -1160,6 +1258,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     quote,
     uniqueCandles,
     showEmas,
+    showMrX,
     showVwap,
     showVolume,
     showLevels,
@@ -1617,6 +1716,20 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                 <Calendar className="w-3.5 h-3.5" />
                 <span>Calendar</span>
               </button>
+
+              <button
+                type="button"
+                onClick={handleToggleMrX}
+                title="Switch to My Trade Live Chart with MR_X EMA 9/15/200 Reversal lines & BUY/SELL markers"
+                className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  showMrX
+                    ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/40 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:text-emerald-700 dark:hover:text-emerald-300'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5" />
+                <span>MR_X 9/15/200</span>
+              </button>
             </>
           )}
 
@@ -1655,9 +1768,22 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               {/* Technical Indicator Toggles */}
               <button
                 type="button"
+                onClick={handleToggleMrX}
+                title="Toggle MR_X EMA 9 (Green) / EMA 15 (Orange) / EMA 200 (Red) Reversal Strategy & BUY/SELL Markers"
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md border transition-colors whitespace-nowrap shrink-0 ${
+                  showMrX
+                    ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/45 text-emerald-700 dark:text-emerald-300'
+                    : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <span>MR_X 9/15/200</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setShowEmas((v) => !v)}
                 className={`px-2 py-1 text-xs font-medium rounded-md border transition-colors whitespace-nowrap shrink-0 ${
-                  showEmas
+                  showEmas && !showMrX
                     ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/35 text-amber-700 dark:text-amber-300'
                     : 'bg-[#F4F6FA] dark:bg-[#08101E] border-slate-200 dark:border-slate-800 text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
                 }`}

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Activity, Columns2, Cpu, Link2, Square } from 'lucide-react';
+import { Activity, Columns2, Cpu, Link2, Send, Square, TrendingUp, Zap } from 'lucide-react';
 import {
   INSTRUMENTS,
   type GeneratedSignalPayload,
@@ -12,6 +12,7 @@ import {
 } from '../types/trading';
 import { TradingChart } from './TradingChart';
 import { SignalCard } from './SignalCard';
+import { buildMrxSignalPayload, evaluateMrxReversalStrategy } from '../lib/mrxStrategy';
 
 interface TerminalViewProps {
   selectedInstrumentId: string;
@@ -79,12 +80,36 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
   onQuickPriceAlert,
 }) => {
   const [splitChartMode, setSplitChartMode] = useState(false);
+  const [mrXEnabled, setMrXEnabled] = useState<boolean>(() => {
+    try {
+      const saved = window.localStorage.getItem('mytrade_terminal_mrx_enabled');
+      return saved === null ? true : saved === '1';
+    } catch {
+      return true;
+    }
+  });
+  const [focusMyTradeChartSignal, setFocusMyTradeChartSignal] = useState(0);
   const [secondaryInstrumentId, setSecondaryInstrumentId] = useState<string>(selectedInstrumentId);
   const [secondaryTimeframe, setSecondaryTimeframe] = useState<Timeframe>(() =>
     timeframe === '5m' ? config.trendTimeframe : '1h'
   );
   const [secondaryQuote, setSecondaryQuote] = useState<MarketQuoteResponse | null>(null);
   const [secondaryLoading, setSecondaryLoading] = useState(false);
+
+  const toggleMrX = useCallback(() => {
+    setMrXEnabled((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem('mytrade_terminal_mrx_enabled', next ? '1' : '0');
+      } catch {
+        // Ignore storage errors
+      }
+      if (next) {
+        setFocusMyTradeChartSignal((c) => c + 1);
+      }
+      return next;
+    });
+  }, []);
 
   // Sync secondary chart instrument when primary changes if user hasn't diverged or on initial enable
   useEffect(() => {
@@ -158,6 +183,40 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
   const cur = quote?.instrument.currency ?? selectedInstrument.currency;
   const pos = (quote?.changePercent ?? 0) >= 0;
+
+  const mrxEvaluation = useMemo(
+    () => (quote?.available && quote.candles?.length ? evaluateMrxReversalStrategy(quote.candles) : null),
+    [quote]
+  );
+
+  const handleMrxAction = useCallback(
+    (action: 'ORDER' | 'PAPER' | 'TELEGRAM') => {
+      if (!mrxEvaluation?.latest || !quote?.price) return;
+      const dir: 'BUY' | 'SELL' =
+        mrxEvaluation.lastSignal?.direction ??
+        (mrxEvaluation.latest.aboveEma200 ? 'BUY' : 'SELL');
+      const payload = buildMrxSignalPayload({
+        instrument: selectedInstrument,
+        timeframe,
+        direction: dir,
+        spotPrice: quote.price,
+        atr: quote.technicals?.atr,
+        evaluation: mrxEvaluation,
+      });
+      if (action === 'ORDER') onOpenOrderModal(payload);
+      else if (action === 'PAPER') void onLogPaperTrade(payload);
+      else void onSendTelegram(payload);
+    },
+    [
+      mrxEvaluation,
+      quote,
+      selectedInstrument,
+      timeframe,
+      onOpenOrderModal,
+      onLogPaperTrade,
+      onSendTelegram,
+    ]
+  );
 
   return (
     <div className="space-y-5">
@@ -256,6 +315,20 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
 
             <button
               type="button"
+              onClick={toggleMrX}
+              title="Plot MR_X EMA 9 / 15 / 200 Reversal strategy & BUY/SELL markers on the main terminal chart"
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
+                mrXEnabled
+                  ? 'bg-emerald-50 dark:bg-emerald-500/15 border-emerald-300 dark:border-emerald-500/45 text-emerald-700 dark:text-emerald-300'
+                  : 'bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              <TrendingUp className="w-3.5 h-3.5" />
+              <span>MR_X 9-15-200 {mrXEnabled ? 'ON' : 'OFF'}</span>
+            </button>
+
+            <button
+              type="button"
               onClick={onNavigateDashboard}
               className="px-3 py-2 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
@@ -312,6 +385,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               onLivePriceTick={onLivePriceTick}
               onQuickOrder={onQuickOrder}
               onQuickPriceAlert={onQuickPriceAlert}
+              mrXEnabled={mrXEnabled}
+              onToggleMrX={toggleMrX}
+              focusMyTradeChartSignal={focusMyTradeChartSignal}
               compact
             />
             <TradingChart
@@ -402,6 +478,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
               onLivePriceTick={onLivePriceTick}
               onQuickOrder={onQuickOrder}
               onQuickPriceAlert={onQuickPriceAlert}
+              mrXEnabled={mrXEnabled}
+              onToggleMrX={toggleMrX}
+              focusMyTradeChartSignal={focusMyTradeChartSignal}
             />
           </div>
         )}
@@ -617,6 +696,136 @@ export const TerminalView: React.FC<TerminalViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MR_X EMA 9-15-200 Reversal Live Terminal Strategy Panel */}
+      {mrXEnabled && (
+        <div className="bg-white dark:bg-[#0E182A] border border-slate-200 dark:border-slate-800 rounded-xl p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-slate-800">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <TrendingUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+                MR_X EMA 9-15-200 Reversal
+              </h3>
+              <span className="text-[11px] font-mono-tabular px-2 py-0.5 rounded bg-slate-100 dark:bg-[#08101E] border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                {selectedInstrument.symbol} · {timeframe.toUpperCase()}
+              </span>
+              {mrxEvaluation && (
+                <span
+                  className={`text-[11px] font-mono-tabular font-semibold px-2 py-0.5 rounded ${
+                    mrxEvaluation.positionState === 'LONG'
+                      ? 'bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-500/35'
+                      : mrxEvaluation.positionState === 'SHORT'
+                        ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-500/35'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
+                  }`}
+                >
+                  State: {mrxEvaluation.positionState}
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setFocusMyTradeChartSignal((c) => c + 1)}
+                className="px-2.5 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-slate-800 dark:text-slate-200 rounded-lg transition-colors"
+              >
+                Plot on Live Chart
+              </button>
+              <button
+                type="button"
+                disabled={!mrxEvaluation?.latest || !quote?.price}
+                onClick={() => handleMrxAction('ORDER')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-45"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                Execute {mrxEvaluation?.lastSignal?.direction ?? (mrxEvaluation?.latest?.aboveEma200 ? 'BUY' : 'SELL')}
+              </button>
+              <button
+                type="button"
+                disabled={!mrxEvaluation?.latest || !quote?.price || sendingTelegram}
+                onClick={() => handleMrxAction('TELEGRAM')}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-[#F4F6FA] dark:bg-[#08101E] hover:bg-slate-200 dark:hover:bg-slate-800 border border-slate-200 dark:border-slate-800 text-blue-700 dark:text-sky-300 rounded-lg transition-colors disabled:opacity-45"
+              >
+                <Send className="w-3.5 h-3.5" />
+                Alert
+              </button>
+            </div>
+          </div>
+
+          {!mrxEvaluation?.latest ? (
+            <div className="py-4 text-xs text-slate-500 dark:text-slate-400">
+              Waiting for live candles to compute EMA 9 / EMA 15 / EMA 200 reversal signals.
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-3 pt-3 text-xs">
+              <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 9 (Green)</div>
+                <div className="font-mono-tabular text-sm font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                  {cur}
+                  {mrxEvaluation.latest.ema9}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 15 (Orange)</div>
+                <div className="font-mono-tabular text-sm font-bold text-orange-600 dark:text-orange-400 mt-0.5">
+                  {cur}
+                  {mrxEvaluation.latest.ema15}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">EMA 200 (Red)</div>
+                <div className="font-mono-tabular text-sm font-bold text-rose-600 dark:text-rose-400 mt-0.5">
+                  {cur}
+                  {mrxEvaluation.latest.ema200}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">Macro Filter</div>
+                <div
+                  className={`text-xs font-semibold mt-1 ${
+                    mrxEvaluation.latest.aboveEma200
+                      ? 'text-emerald-700 dark:text-emerald-400'
+                      : 'text-rose-700 dark:text-rose-400'
+                  }`}
+                >
+                  {mrxEvaluation.latest.aboveEma200
+                    ? 'Close > EMA 200 (BUY Zone)'
+                    : 'Close < EMA 200 (SELL Zone)'}
+                </div>
+              </div>
+
+              <div className="p-2.5 rounded-lg bg-[#F4F6FA] dark:bg-[#08101E] border border-slate-200 dark:border-slate-800 col-span-2 md:col-span-1">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  Last Reversal ({mrxEvaluation.signals.length} on chart)
+                </div>
+                {mrxEvaluation.lastSignal ? (
+                  <div className="mt-0.5 flex items-baseline justify-between gap-1.5">
+                    <span
+                      className={`font-bold ${
+                        mrxEvaluation.lastSignal.direction === 'BUY'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : 'text-rose-600 dark:text-rose-400'
+                      }`}
+                    >
+                      {mrxEvaluation.lastSignal.direction}
+                    </span>
+                    <span className="font-mono-tabular text-slate-800 dark:text-slate-200">
+                      {cur}
+                      {mrxEvaluation.lastSignal.price}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="text-slate-500 dark:text-slate-400 mt-1">Awaiting 9/15 cross</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Generated Signal Panel */}
       {liveSignal && (

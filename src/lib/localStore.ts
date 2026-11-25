@@ -432,7 +432,7 @@ export function loadLocalPineStrategies(): PineStrategyRecord[] {
       timeframe: tpl.timeframe,
       pineCode: tpl.pineCode,
       quantity: tpl.quantity,
-      initialCapital: 100_000,
+      initialCapital: tpl.initialCapital ?? 100_000,
       stopLossPct: tpl.stopLossPct,
       takeProfitPct: tpl.takeProfitPct,
       riskPerTradePct: tpl.riskPerTradePct,
@@ -467,6 +467,7 @@ export function loadLocalPineStrategies(): PineStrategyRecord[] {
             timeframe: tpl.timeframe,
             pineCode: tpl.pineCode,
             quantity: tpl.quantity,
+            initialCapital: tpl.initialCapital ?? s.initialCapital ?? 100_000,
             stopLossPct: tpl.stopLossPct,
             takeProfitPct: tpl.takeProfitPct,
             riskPerTradePct: tpl.riskPerTradePct,
@@ -477,6 +478,19 @@ export function loadLocalPineStrategies(): PineStrategyRecord[] {
       }
       return s;
     });
+
+    // Auto-append any newly added built-in templates (e.g., MR_X EMA 9-15-200 Reversal)
+    const seededAll = buildSeeded();
+    for (const candidate of seededAll) {
+      const alreadyExists = upgraded.some(
+        (existing) => existing.id === candidate.id || existing.name === candidate.name
+      );
+      if (!alreadyExists) {
+        upgraded.push(candidate);
+        changed = true;
+      }
+    }
+
     if (changed) {
       writeJson(KEYS.pineStrategies, upgraded);
     }

@@ -10,6 +10,36 @@ import type {
 } from '../src/types/trading.ts';
 import { isLiquiditySessionActive } from './economicCalendarService.ts';
 
+/**
+ * Dynamic decimal precision based on instrument price scale so forex pairs
+ * (e.g. EUR/USD 1.0945) and micro-cap crypto (e.g. 0.004215) are never
+ * truncated to 2 decimal places.
+ */
+export function getPriceDecimals(referencePrice: number): number {
+  const abs = Math.abs(referencePrice);
+  if (!Number.isFinite(abs) || abs === 0) return 2;
+  if (abs < 0.01) return 6;
+  if (abs < 1) return 5;
+  if (abs < 20) return 4;
+  if (abs < 500) return 3;
+  return 2;
+}
+
+export function roundPriceFor(value: number, referencePrice: number): number {
+  if (!Number.isFinite(value)) return 0;
+  const decimals = getPriceDecimals(referencePrice || value);
+  return Number(value.toFixed(decimals));
+}
+
+export function getSafeAtr(atr: number | null | undefined, referencePrice: number): number {
+  const safePrice = Number.isFinite(referencePrice) && referencePrice > 0 ? referencePrice : 1;
+  const floor = Math.max(safePrice * 0.001, 1e-6);
+  if (typeof atr === 'number' && Number.isFinite(atr) && atr > 0) {
+    return Math.max(atr, floor);
+  }
+  return Math.max(safePrice * 0.004, floor);
+}
+
 export function calculateEMASeries(values: number[], period: number): number[] {
   if (values.length === 0 || period <= 0) return [];
   const k = 2 / (period + 1);
@@ -20,29 +50,53 @@ export function calculateEMASeries(values: number[], period: number): number[] {
   return result;
 }
 
+/**
+ * Session-anchored VWAP: resets cumulative price*volume and volume on each UTC
+ * trading day boundary, and handles zero-volume candles cleanly without
+ * fabricating synthetic volume=1 bars when real volume is present.
+ */
 export function calculateVWAPSeries(candles: CandleBar[]): number[] {
   if (candles.length === 0) return [];
   let cumulativePV = 0;
   let cumulativeV = 0;
+  let currentSessionDay = -1;
   const result: number[] = [];
+
   for (const bar of candles) {
     const typical = (bar.high + bar.low + bar.close) / 3;
-    const vol = bar.volume > 0 ? bar.volume : 1;
-    cumulativePV += typical * vol;
-    cumulativeV += vol;
-    result.push(cumulativePV / cumulativeV);
+    const barTimeSec = Number.isFinite(bar.time) ? bar.time : 0;
+    const sessionDay = barTimeSec > 0 ? Math.floor(barTimeSec / 86_400) : currentSessionDay;
+
+    if (currentSessionDay !== -1 && sessionDay !== currentSessionDay) {
+      cumulativePV = 0;
+      cumulativeV = 0;
+    }
+    currentSessionDay = sessionDay;
+
+    const vol = Number.isFinite(bar.volume) && bar.volume > 0 ? bar.volume : 0;
+    if (vol > 0) {
+      cumulativePV += typical * vol;
+      cumulativeV += vol;
+      result.push(cumulativePV / cumulativeV);
+    } else if (cumulativeV > 0) {
+      // Carry forward previous session VWAP when a zero-volume tick occurs
+      result.push(cumulativePV / cumulativeV);
+    } else {
+      // No volume reported in this session yet: anchor to typical price
+      result.push(typical);
+    }
   }
   return result;
 }
 
 export function calculateRSI(closes: number[], period = 14): number | null {
-  if (closes.length <= period) return null;
+  if (closes.length <= period || period <= 0) return null;
   let gains = 0;
   let losses = 0;
   for (let i = 1; i <= period; i++) {
     const diff = closes[i] - closes[i - 1];
-    if (diff >= 0) gains += diff;
-    else losses += Math.abs(diff);
+    if (diff > 0) gains += diff;
+    else if (diff < 0) losses += Math.abs(diff);
   }
   let avgGain = gains / period;
   let avgLoss = losses / period;
@@ -53,7 +107,10 @@ export function calculateRSI(closes: number[], period = 14): number | null {
     avgGain = (avgGain * (period - 1) + gain) / period;
     avgLoss = (avgLoss * (period - 1) + loss) / period;
   }
+  // Flat price series (zero gains and zero losses) is neutral (50), never overbought (100)
+  if (avgGain === 0 && avgLoss === 0) return 50;
   if (avgLoss === 0) return 100;
+  if (avgGain === 0) return 0;
   const rs = avgGain / avgLoss;
   return Number((100 - 100 / (1 + rs)).toFixed(2));
 }
@@ -71,15 +128,17 @@ export function calculateMACD(closes: number[]): {
   const lastIdx = closes.length - 1;
   const macdLine = macdSeries[lastIdx];
   const signalLine = signalSeries[lastIdx];
+  const ref = closes[lastIdx] || 1;
+  const dec = Math.max(4, getPriceDecimals(ref));
   return {
-    macdLine: Number(macdLine.toFixed(4)),
-    signalLine: Number(signalLine.toFixed(4)),
-    histogram: Number((macdLine - signalLine).toFixed(4)),
+    macdLine: Number(macdLine.toFixed(dec)),
+    signalLine: Number(signalLine.toFixed(dec)),
+    histogram: Number((macdLine - signalLine).toFixed(dec)),
   };
 }
 
 export function calculateATR(candles: CandleBar[], period = 14): number | null {
-  if (candles.length <= period) return null;
+  if (candles.length <= period || period <= 0) return null;
   const trs: number[] = [];
   for (let i = 1; i < candles.length; i++) {
     const cur = candles[i];
@@ -93,7 +152,9 @@ export function calculateATR(candles: CandleBar[], period = 14): number | null {
   }
   const recent = trs.slice(-period);
   const sum = recent.reduce((acc, v) => acc + v, 0);
-  return Number((sum / recent.length).toFixed(4));
+  const lastClose = candles[candles.length - 1]?.close ?? 1;
+  const dec = Math.max(4, getPriceDecimals(lastClose) + 1);
+  return Number((sum / recent.length).toFixed(dec));
 }
 
 export function calculateADX(candles: CandleBar[], period = 14): number | null {
@@ -211,23 +272,35 @@ export function computeTechnicals(
 ): TechnicalSnapshot {
   const closes = candles.map((c) => c.close);
   const lastClose = closes[closes.length - 1] ?? 0;
+  const indDecimals = Math.max(4, getPriceDecimals(lastClose));
 
   const emaFastSeries = calculateEMASeries(closes, periods.fast);
   const emaMidSeries = calculateEMASeries(closes, periods.mid);
   const emaSlowSeries = calculateEMASeries(closes, periods.slow);
   const vwapSeries = calculateVWAPSeries(candles);
 
-  const ema9 = emaFastSeries.length ? Number(emaFastSeries[emaFastSeries.length - 1].toFixed(4)) : null;
-  const ema20 = emaMidSeries.length ? Number(emaMidSeries[emaMidSeries.length - 1].toFixed(4)) : null;
-  const ema50 = emaSlowSeries.length ? Number(emaSlowSeries[emaSlowSeries.length - 1].toFixed(4)) : null;
-  const vwap = vwapSeries.length ? Number(vwapSeries[vwapSeries.length - 1].toFixed(4)) : null;
+  const ema9 = emaFastSeries.length
+    ? Number(emaFastSeries[emaFastSeries.length - 1].toFixed(indDecimals))
+    : null;
+  const ema20 = emaMidSeries.length
+    ? Number(emaMidSeries[emaMidSeries.length - 1].toFixed(indDecimals))
+    : null;
+  const ema50 = emaSlowSeries.length
+    ? Number(emaSlowSeries[emaSlowSeries.length - 1].toFixed(indDecimals))
+    : null;
+  const vwap = vwapSeries.length
+    ? Number(vwapSeries[vwapSeries.length - 1].toFixed(indDecimals))
+    : null;
   const rsi = calculateRSI(closes, periods.rsi);
   const macd = calculateMACD(closes);
   const atr = calculateATR(candles, 14);
   const adx = calculateADX(candles, 14);
   const bollingerSqueeze = detectBollingerSqueeze(candles, 20);
 
-  const recentVols = candles.slice(-21, -1).map((c) => c.volume).filter((v) => v > 0);
+  const recentVols = candles
+    .slice(-21, -1)
+    .map((c) => c.volume)
+    .filter((v) => Number.isFinite(v) && v > 0);
   const lastVol = candles[candles.length - 1]?.volume ?? 0;
   let volumeRatio: number | null = null;
   if (recentVols.length >= 5 && lastVol > 0) {
@@ -235,33 +308,27 @@ export function computeTechnicals(
     if (avgVol > 0) volumeRatio = Number((lastVol / avgVol).toFixed(2));
   }
 
+  // Trend bias strictly enforces minSep between EMA20 and EMA50 across all branches
+  // so tangled/flat EMAs cannot bypass the separation filter.
   let trendBias: TechnicalSnapshot['trendBias'] = 'SIDEWAYS';
   if (ema9 !== null && ema20 !== null && ema50 !== null) {
     const prevEma20 =
       emaMidSeries.length >= 4 ? emaMidSeries[emaMidSeries.length - 4] : ema20;
     const ema20Rising = ema20 > prevEma20;
     const ema20Falling = ema20 < prevEma20;
-    const minSep = (atr ?? lastClose * 0.002) * 0.18;
+    const safeAtr = getSafeAtr(atr, lastClose);
+    const minSep = safeAtr * 0.18;
 
-    if (
-      lastClose > ema9 &&
-      ema9 > ema20 &&
-      ema20 > ema50 &&
-      ema20 - ema50 >= minSep &&
-      ema20Rising
-    ) {
+    const bullishSeparation = ema20 - ema50 >= minSep;
+    const bearishSeparation = ema50 - ema20 >= minSep;
+
+    if (lastClose > ema9 && ema9 > ema20 && bullishSeparation && ema20Rising) {
       trendBias = 'BULLISH';
-    } else if (
-      lastClose < ema9 &&
-      ema9 < ema20 &&
-      ema20 < ema50 &&
-      ema50 - ema20 >= minSep &&
-      ema20Falling
-    ) {
+    } else if (lastClose < ema9 && ema9 < ema20 && bearishSeparation && ema20Falling) {
       trendBias = 'BEARISH';
-    } else if (lastClose > ema20 && ema9 > ema20 && ema20 >= ema50 && ema20Rising) {
+    } else if (lastClose > ema20 && ema9 >= ema20 && bullishSeparation && ema20Rising) {
       trendBias = 'BULLISH';
-    } else if (lastClose < ema20 && ema9 < ema20 && ema20 <= ema50 && ema20Falling) {
+    } else if (lastClose < ema20 && ema9 <= ema20 && bearishSeparation && ema20Falling) {
       trendBias = 'BEARISH';
     }
   }
@@ -307,30 +374,60 @@ export function computeLevels(
   currentPrice: number,
   atr: number
 ): SupportResistanceLevels {
+  const safePrice = Number.isFinite(currentPrice) && currentPrice > 0 ? currentPrice : 0;
+  const safeAtr = getSafeAtr(atr, safePrice || 1);
+  const r = (v: number) => roundPriceFor(v, safePrice || 1);
+
+  if (candles.length === 0) {
+    const immediateResistance = r(safePrice + safeAtr * 0.8);
+    const immediateSupport = r(Math.max(0, safePrice - safeAtr * 0.8));
+    const strongResistance = r(immediateResistance + safeAtr * 1.2);
+    const strongSupport = r(Math.max(0, immediateSupport - safeAtr * 1.2));
+    return {
+      immediateSupport,
+      strongSupport,
+      immediateResistance,
+      strongResistance,
+      breakoutLevel: r(immediateResistance + safeAtr * 0.15),
+      breakdownLevel: r(Math.max(0, immediateSupport - safeAtr * 0.15)),
+      noTradeZoneLow: r(Math.max(0, safePrice - safeAtr * 0.25)),
+      noTradeZoneHigh: r(safePrice + safeAtr * 0.25),
+    };
+  }
+
   const recent20 = candles.slice(-20);
   const recent60 = candles.slice(-60);
 
-  const r20Highs = recent20.map((c) => c.high);
-  const r20Lows = recent20.map((c) => c.low);
-  const r60Highs = recent60.map((c) => c.high);
-  const r60Lows = recent60.map((c) => c.low);
+  let immResRaw = -Infinity;
+  let immSupRaw = Infinity;
+  for (const c of recent20) {
+    if (Number.isFinite(c.high) && c.high > immResRaw) immResRaw = c.high;
+    if (Number.isFinite(c.low) && c.low < immSupRaw) immSupRaw = c.low;
+  }
 
-  const immResRaw = Math.max(...r20Highs);
-  const immSupRaw = Math.min(...r20Lows);
-  const strResRaw = Math.max(...r60Highs);
-  const strSupRaw = Math.min(...r60Lows);
+  let strResRaw = -Infinity;
+  let strSupRaw = Infinity;
+  for (const c of recent60) {
+    if (Number.isFinite(c.high) && c.high > strResRaw) strResRaw = c.high;
+    if (Number.isFinite(c.low) && c.low < strSupRaw) strSupRaw = c.low;
+  }
 
-  const immediateResistance = Number(Math.max(immResRaw, currentPrice + atr * 0.45).toFixed(2));
-  const immediateSupport = Number(Math.min(immSupRaw, currentPrice - atr * 0.45).toFixed(2));
-  const strongResistance = Number(Math.max(strResRaw, immediateResistance + atr * 0.8).toFixed(2));
-  const strongSupport = Number(Math.min(strSupRaw, immediateSupport - atr * 0.8).toFixed(2));
+  if (!Number.isFinite(immResRaw)) immResRaw = safePrice + safeAtr * 0.45;
+  if (!Number.isFinite(immSupRaw)) immSupRaw = Math.max(0, safePrice - safeAtr * 0.45);
+  if (!Number.isFinite(strResRaw)) strResRaw = immResRaw + safeAtr * 0.8;
+  if (!Number.isFinite(strSupRaw)) strSupRaw = Math.max(0, immSupRaw - safeAtr * 0.8);
 
-  const breakoutLevel = Number((immediateResistance + atr * 0.15).toFixed(2));
-  const breakdownLevel = Number((immediateSupport - atr * 0.15).toFixed(2));
+  const immediateResistance = r(Math.max(immResRaw, safePrice + safeAtr * 0.45));
+  const immediateSupport = r(Math.max(0, Math.min(immSupRaw, safePrice - safeAtr * 0.45)));
+  const strongResistance = r(Math.max(strResRaw, immediateResistance + safeAtr * 0.8));
+  const strongSupport = r(Math.max(0, Math.min(strSupRaw, immediateSupport - safeAtr * 0.8)));
+
+  const breakoutLevel = r(immediateResistance + safeAtr * 0.15);
+  const breakdownLevel = r(Math.max(0, immediateSupport - safeAtr * 0.15));
 
   const midBand = (immediateResistance + immediateSupport) / 2;
-  const noTradeZoneLow = Number((midBand - atr * 0.25).toFixed(2));
-  const noTradeZoneHigh = Number((midBand + atr * 0.25).toFixed(2));
+  const noTradeZoneLow = r(Math.max(0, midBand - safeAtr * 0.25));
+  const noTradeZoneHigh = r(midBand + safeAtr * 0.25);
 
   return {
     immediateSupport,
@@ -457,15 +554,17 @@ export function evaluateMultiTimeframeStrategy(params: {
   trendQuote: MarketQuoteResponse; // 15m
   entryQuote: MarketQuoteResponse; // 5m
   config: StrategyConfig;
+  now?: Date;
 }): GeneratedSignalPayload {
-  const { instrument, trendQuote, entryQuote, config } = params;
+  const { instrument, trendQuote, entryQuote, config, now } = params;
   const c = instrument.currency;
 
   const tTech = trendQuote.technicals!;
   const eTech = entryQuote.technicals!;
   const eLevels = entryQuote.levels!;
+  const tLevels = trendQuote.levels ?? eLevels;
   const spotPrice = entryQuote.price ?? 0;
-  const atr = eTech.atr ?? spotPrice * 0.004;
+  const atr = getSafeAtr(eTech.atr, spotPrice);
 
   const isCrude = Boolean(instrument.ema9Priority && config.comexCrudeEma9Priority);
 
@@ -510,7 +609,7 @@ export function evaluateMultiTimeframeStrategy(params: {
     checklist.push({
       label: `${config.trendTimeframe} Trend Slope & Alignment`,
       passed: true,
-      detail: `${config.trendTimeframe} bias is ${tTech.trendBias} with rising EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} separation`,
+      detail: `${config.trendTimeframe} bias is ${tTech.trendBias} with clean EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} separation`,
     });
     reasonsFor.push(`${config.trendTimeframe} trend confirms directional impulse with clean EMA separation.`);
   } else {
@@ -531,7 +630,7 @@ export function evaluateMultiTimeframeStrategy(params: {
     checklist.push({
       label: `${config.entryTimeframe} Entry & Anti-Exhaustion Filter`,
       passed: true,
-      detail: `${eTech.candlePattern} within value zone (${(distFromEma20 / Math.max(atr, 1e-6)).toFixed(2)}x ATR from EMA ${config.emaMid})`,
+      detail: `${eTech.candlePattern} within value zone (${(distFromEma20 / atr).toFixed(2)}x ATR from EMA ${config.emaMid})`,
     });
     reasonsFor.push(`${config.entryTimeframe} entry is inside high-probability pullback/breakout zone (not overextended).`);
   } else {
@@ -539,7 +638,7 @@ export function evaluateMultiTimeframeStrategy(params: {
       label: `${config.entryTimeframe} Entry & Anti-Exhaustion Filter`,
       passed: false,
       detail: isOverextended
-        ? `Extended ${(distFromEma20 / Math.max(atr, 1e-6)).toFixed(2)}x ATR from EMA ${config.emaMid} / RSI ${rsiVal} — avoiding chase.`
+        ? `Extended ${(distFromEma20 / atr).toFixed(2)}x ATR from EMA ${config.emaMid} / RSI ${rsiVal} — avoiding chase.`
         : `Pattern: ${eTech.candlePattern} — waiting for cleaner ${config.entryTimeframe} structure.`,
     });
     reasonsAgainst.push(
@@ -571,7 +670,7 @@ export function evaluateMultiTimeframeStrategy(params: {
     checklist.push({
       label: isCrude ? `EMA ${config.emaFast} (Crude Oil Priority) & Stack` : `EMA ${config.emaFast}/${config.emaMid}/${config.emaSlow} Stack`,
       passed: true,
-      detail: `Price (${spotPrice}) aligned above/below EMA ${config.emaFast} (${eTech.ema9}) -> EMA ${config.emaMid} (${eTech.ema20}) -> EMA ${config.emaSlow} (${eTech.ema50}).`,
+      detail: `Price (${spotPrice}) aligned with EMA ${config.emaFast} (${eTech.ema9}) -> EMA ${config.emaMid} (${eTech.ema20}) -> EMA ${config.emaSlow} (${eTech.ema50}).`,
     });
     reasonsFor.push(
       isCrude
@@ -663,8 +762,10 @@ export function evaluateMultiTimeframeStrategy(params: {
     );
   }
 
-  // Compute structural Entry, SL (with breathing room to prevent stop-hunts), and asymmetric Targets
-  const roundPrice = (v: number) => Number(v.toFixed(spotPrice > 500 ? 2 : 4));
+  // Compute structural Trigger Entry (making WAIT state genuinely reachable when price has not yet
+  // cleared breakout/breakdown structure), Stop-Loss, and structurally-anchored Targets (so R:R
+  // reflects real S/R liquidity clearance instead of a fixed 2.4x multiplier).
+  const roundPrice = (v: number) => roundPriceFor(v, spotPrice);
   let entryPrice = roundPrice(spotPrice);
   let stopLoss = 0;
   let target1 = 0;
@@ -673,29 +774,100 @@ export function evaluateMultiTimeframeStrategy(params: {
   let invalidationLevel = 0;
 
   if (candidateDirection === 'BUY') {
-    entryPrice = roundPrice(spotPrice);
+    // If spot sits just beneath immediate resistance/breakout within 1.25x ATR (and > 0.35x ATR away),
+    // stage a WAIT breakout trigger above resistance rather than chasing below resistance.
+    const distToBreakout = eLevels.breakoutLevel - spotPrice;
+    if (distToBreakout > atr * 0.35 && distToBreakout <= atr * 1.25) {
+      entryPrice = roundPrice(eLevels.breakoutLevel);
+    } else {
+      entryPrice = roundPrice(spotPrice);
+    }
+
     const structuralFloor = Math.min(
       eLevels.immediateSupport,
-      eTech.ema20 !== null ? eTech.ema20 - atr * 0.45 : spotPrice - atr * 1.6
+      eTech.ema20 !== null ? eTech.ema20 - atr * 0.45 : entryPrice - atr * 1.4
     );
-    const risk = Math.max(atr * 1.6, Math.min(atr * 2.5, entryPrice - structuralFloor));
-    stopLoss = roundPrice(entryPrice - risk);
-    invalidationLevel = roundPrice(stopLoss - atr * 0.3);
-    target1 = roundPrice(entryPrice + risk * 1.5);
-    target2 = roundPrice(entryPrice + risk * 2.4);
-    target3 = roundPrice(entryPrice + risk * 3.4);
+    const rawRisk = entryPrice - structuralFloor;
+    const risk = Math.max(atr * 1.1, Math.min(atr * 2.5, rawRisk > 0 ? rawRisk : atr * 1.5));
+    stopLoss = roundPrice(Math.max(0, entryPrice - risk));
+    invalidationLevel = roundPrice(Math.max(0, stopLoss - atr * 0.3));
+
+    // Anchor targets to higher-timeframe / immediate structural liquidity levels above entry
+    const candidateRes = [
+      eLevels.immediateResistance,
+      eLevels.strongResistance,
+      tLevels.immediateResistance,
+      tLevels.strongResistance,
+    ]
+      .filter((lvl) => Number.isFinite(lvl) && lvl > entryPrice + atr * 0.4)
+      .sort((a, b) => a - b);
+
+    const swingRange = Math.max(
+      tLevels.strongResistance - tLevels.strongSupport,
+      eLevels.strongResistance - eLevels.strongSupport,
+      atr * 2.0
+    );
+
+    const structuralT1 = candidateRes[0] ?? entryPrice + Math.max(atr * 1.4, swingRange * 0.38);
+    const structuralT2 =
+      candidateRes.find((lvl) => lvl > structuralT1 + atr * 0.5) ??
+      Math.max(structuralT1 + atr * 0.9, tLevels.strongResistance, entryPrice + swingRange * 0.65);
+    const structuralT3 = Math.max(
+      structuralT2 + atr * 1.0,
+      entryPrice + swingRange * 1.0
+    );
+
+    target1 = roundPrice(structuralT1);
+    target2 = roundPrice(structuralT2);
+    target3 = roundPrice(structuralT3);
   } else if (candidateDirection === 'SELL') {
-    entryPrice = roundPrice(spotPrice);
+    const distToBreakdown = spotPrice - eLevels.breakdownLevel;
+    if (distToBreakdown > atr * 0.35 && distToBreakdown <= atr * 1.25) {
+      entryPrice = roundPrice(eLevels.breakdownLevel);
+    } else {
+      entryPrice = roundPrice(spotPrice);
+    }
+
     const structuralCap = Math.max(
       eLevels.immediateResistance,
-      eTech.ema20 !== null ? eTech.ema20 + atr * 0.45 : spotPrice + atr * 1.6
+      eTech.ema20 !== null ? eTech.ema20 + atr * 0.45 : entryPrice + atr * 1.4
     );
-    const risk = Math.max(atr * 1.6, Math.min(atr * 2.5, structuralCap - entryPrice));
+    const rawRisk = structuralCap - entryPrice;
+    const risk = Math.max(atr * 1.1, Math.min(atr * 2.5, rawRisk > 0 ? rawRisk : atr * 1.5));
     stopLoss = roundPrice(entryPrice + risk);
     invalidationLevel = roundPrice(stopLoss + atr * 0.3);
-    target1 = roundPrice(entryPrice - risk * 1.5);
-    target2 = roundPrice(entryPrice - risk * 2.4);
-    target3 = roundPrice(entryPrice - risk * 3.4);
+
+    const candidateSup = [
+      eLevels.immediateSupport,
+      eLevels.strongSupport,
+      tLevels.immediateSupport,
+      tLevels.strongSupport,
+    ]
+      .filter((lvl) => Number.isFinite(lvl) && lvl > 0 && lvl < entryPrice - atr * 0.4)
+      .sort((a, b) => b - a);
+
+    const swingRange = Math.max(
+      tLevels.strongResistance - tLevels.strongSupport,
+      eLevels.strongResistance - eLevels.strongSupport,
+      atr * 2.0
+    );
+
+    const structuralT1 =
+      candidateSup[0] ?? Math.max(0, entryPrice - Math.max(atr * 1.4, swingRange * 0.38));
+    const structuralT2 =
+      candidateSup.find((lvl) => lvl < structuralT1 - atr * 0.5) ??
+      Math.max(
+        0,
+        Math.min(structuralT1 - atr * 0.9, tLevels.strongSupport, entryPrice - swingRange * 0.65)
+      );
+    const structuralT3 = Math.max(
+      0,
+      Math.min(structuralT2 - atr * 1.0, entryPrice - swingRange * 1.0)
+    );
+
+    target1 = roundPrice(structuralT1);
+    target2 = roundPrice(structuralT2);
+    target3 = roundPrice(structuralT3);
   }
 
   const riskDist = Math.abs(entryPrice - stopLoss);
@@ -707,8 +879,15 @@ export function evaluateMultiTimeframeStrategy(params: {
   checklist.push({
     label: `Risk-to-Reward (>= 1:${config.minRiskReward})`,
     passed: rrPass && candidateDirection !== 'NO_TRADE',
-    detail: rrPass ? `Calculated R:R is ${rrString} with 1.6x–2.5x ATR swing SL.` : `Risk/Reward threshold not met.`,
+    detail: rrPass
+      ? `Structural R:R is ${rrString} derived from swing S/R liquidity levels.`
+      : `Structural R:R (${rrString}) is below required 1:${config.minRiskReward} threshold.`,
   });
+  if (!rrPass && candidateDirection !== 'NO_TRADE') {
+    reasonsAgainst.push(
+      `Nearest structural S/R targets yield only ${rrString} R:R (minimum required 1:${config.minRiskReward}).`
+    );
+  }
 
   // 7. Market Regime & ADX(14) Chop Filter
   const adxThreshold = Math.max(10, Math.min(50, Number(config.adxMinThreshold ?? 18)));
@@ -731,22 +910,25 @@ export function evaluateMultiTimeframeStrategy(params: {
     reasonsFor.push(`ADX(14) at ${entryAdx} confirms active directional trend strength (${regimeLabel}).`);
   }
 
-  // 8. Active Liquidity Session Filter
+  // 8. Active Liquidity Session Filter (now strictly enforced in passesGate)
   const sessionFilterEnabled = config.enableSessionFilter !== false;
-  const sessionState = isLiquiditySessionActive(instrument.segment, instrument.id);
+  const sessionState = isLiquiditySessionActive(instrument.segment, instrument.id, now);
+  const sessionPass = !sessionFilterEnabled || sessionState.active;
   checklist.push({
     label: 'Active Session Liquidity Window',
-    passed: !sessionFilterEnabled || sessionState.active,
+    passed: sessionPass,
     detail: sessionState.label,
   });
-  if (sessionFilterEnabled && !sessionState.active) {
-    reasonsAgainst.push(`${sessionState.label} — lower institutional follow-through.`);
+  if (!sessionPass) {
+    reasonsAgainst.push(`${sessionState.label} — active liquidity window required by session filter.`);
   }
 
-  // Strict Discipline Gate -> NO TRADE if chop, low ADX (unless A+ score >= 88), overextended, low score, or weak R:R
+  // Strict Discipline Gate -> NO TRADE if session closed, chop, low ADX (unless A+ score >= 88),
+  // overextended, low score, or weak structural R:R
   const passesGate =
     candidateDirection !== 'NO_TRADE' &&
     !isOverextended &&
+    sessionPass &&
     score >= config.minSetupScore &&
     rrPass &&
     (adxPass || score >= 88) &&
